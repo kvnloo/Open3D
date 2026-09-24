@@ -1,0 +1,49 @@
+name: Prepare TSDF 7580 candidate
+
+on:
+  push:
+    branches: [ci/prepare-tsdf-7580]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.repository == 'kvnloo/Open3D'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tsdf-depth-nearest-7580
+          fetch-depth: 1
+      - name: Verify base and apply the two-line candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "1e5d1976d3d0f41e6e0faee3c4553b9e0530c782"
+          target=cpp/open3d/t/geometry/kernel/VoxelBlockGridImpl.h
+          test "$(git hash-object "$target")" = "78b1bf6bbf6d0eed8145a0bd4674a245990dc247"
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('cpp/open3d/t/geometry/kernel/VoxelBlockGridImpl.h')
+          text = path.read_text()
+          old = ('        transform_indexer.Project(xc, yc, zc, &u, &v);\n'
+                 '        if (!depth_indexer.InBoundary(u, v)) {\n')
+          new = ('        transform_indexer.Project(xc, yc, zc, &u, &v);\n'
+                 '        u = roundf(u);\n'
+                 '        v = roundf(v);\n'
+                 '        if (!depth_indexer.InBoundary(u, v)) {\n')
+          assert text.count(old) == 1, 'Expected exactly one depth lookup'
+          path.write_text(text.replace(old, new))
+          PY
+          git diff --check
+          test "$(git diff --numstat)" = "$(printf '2\t0\t%s' "$target")"
+          git diff -- "$target"
+          git config user.name 'Kevin Rajan'
+          git config user.email '7121943+kvnloo@users.noreply.github.com'
+          git add -- "$target"
+          git commit -m 'Round projected depth coordinates before TSDF lookup' -m 'Keep nearest-pixel rounding ahead of the image bounds check. AI-assisted implementation and review: OpenAI ChatGPT.'
+          git push origin HEAD:refs/heads/fix/tsdf-depth-nearest-7580
+          echo "Candidate commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Only two production lines were added; the regression is unchanged.' >> "$GITHUB_STEP_SUMMARY"
