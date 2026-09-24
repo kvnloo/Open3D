@@ -1,0 +1,37 @@
+name: Format TSDF 7580 regression
+on:
+  push:
+    branches: [ci/format-tsdf-7580]
+permissions:
+  contents: read
+jobs:
+  format:
+    if: github.repository == 'kvnloo/Open3D'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1e5d1976d3d0f41e6e0faee3c4553b9e0530c782
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install yapf==0.43.0
+      - name: Format the single test and verify unchanged syntax tree
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          from yapf.yapflib.yapf_api import FormatCode
+          path = Path('python/test/t/geometry/test_voxel_block_grid.py')
+          before = path.read_text()
+          after, changed = FormatCode(before, style_config='.style.yapf')
+          assert ast.dump(ast.parse(before)) == ast.dump(ast.parse(after))
+          path.write_text(after)
+          print('BEGIN_FORMATTED_TEST')
+          print(after, end='')
+          print('END_FORMATTED_TEST')
+          PY
+          git diff --check
+          git diff -- python/test/t/geometry/test_voxel_block_grid.py
