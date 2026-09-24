@@ -1,0 +1,58 @@
+name: VBG negative-coordinate IO 6795
+
+on:
+  push:
+    branches: [ci/vbg-io-negative-6795]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  current-wheel:
+    if: github.repository == 'kvnloo/Open3D'
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Reuse pinned source-built Open3D wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: open3d-0.20.0+337b457-cp314-cp314-macosx_11_0_arm64.whl
+          path: wheel
+          repository: kvnloo/Open3D
+          run-id: 35964996507
+          github-token: ${{ github.token }}
+      - name: Install exact wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install wheel/*.whl
+          python - <<'PY'
+          import open3d as o3d
+          print(o3d.__version__)
+          print(o3d.__file__)
+          print(o3d._build_config)
+          PY
+      - name: Run signed-coordinate round-trip probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python validation/vbg6795/roundtrip.py | tee vbg-6795.log
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vbg-6795-roundtrip-evidence
+          path: |
+            vbg-6795.log
+            vbg-6795-results.json
+          if-no-files-found: warn
+          retention-days: 14
