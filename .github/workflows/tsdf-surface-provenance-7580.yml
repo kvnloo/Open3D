@@ -1,0 +1,130 @@
+name: TSDF 7580 surface and provenance
+on:
+  push:
+    branches: [ci/tsdf-surface-provenance-7580]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: tsdf-surface-provenance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  surface:
+    if: github.repository == 'kvnloo/Open3D'
+    runs-on: macos-14
+    timeout-minutes: 35
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      VECLIB_MAXIMUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Prepare evidence directory
+        run: |
+          mkdir -p results
+          git rev-parse HEAD > results/validation-commit.txt
+          python -m pip install requests
+      - name: Verify exact original artifact identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python validation/tsdf7580/provenance.py metadata
+      - uses: actions/download-artifact@v4
+        with:
+          name: open3d-0.20.0+337b457-cp314-cp314-macosx_11_0_arm64.whl
+          run-id: 35964996507
+          github-token: ${{ github.token }}
+          path: wheels/control
+      - uses: actions/download-artifact@v4
+        with:
+          name: open3d-0.20.0+203aff2-cp314-cp314-macosx_11_0_arm64.whl
+          run-id: 35965027760
+          github-token: ${{ github.token }}
+          path: wheels/candidate
+      - name: Install control and generate fixed inputs once
+        run: |
+          shasum -a 256 wheels/*/*.whl > results/wheel-sha256.txt
+          python -m pip install wheels/control/*.whl pytest==8.3.5
+          python -m pip freeze > results/control-environment.txt
+          python -m py_compile validation/tsdf7580/*.py
+          python validation/tsdf7580/surface_probe.py generate
+          shasum -a 256 validation/tsdf7580/surface_probe.py > results/probe-sha256.txt
+      - name: Measure original reconstruction
+        run: |
+          python validation/tsdf7580/surface_probe.py probe --label control --version 0.20.0+337b457 --output results/control.json 2>&1 | tee results/control.log
+      - name: Swap only Open3D and verify unchanged environment
+        run: |
+          python -m pip install --no-deps --force-reinstall wheels/candidate/*.whl
+          python -m pip freeze > results/candidate-environment.txt
+          python - <<'PY'
+          from pathlib import Path
+          def deps(p):
+              return [s for s in Path(p).read_text().splitlines() if not s.lower().startswith('open3d')]
+          assert deps('results/control-environment.txt') == deps('results/candidate-environment.txt')
+          PY
+          shasum -a 256 -c results/probe-sha256.txt
+      - name: Measure candidate with identical input files
+        run: |
+          python validation/tsdf7580/surface_probe.py probe --label candidate --version 0.20.0+203aff2 --output results/candidate.json 2>&1 | tee results/candidate.log
+      - name: Compare physical surface error, not expected triangle counts
+        run: |
+          python validation/tsdf7580/surface_probe.py compare --output results/surface-comparison.md
+          cat results/surface-comparison.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tsdf-7580-fixed-input-surface-evidence
+          path: results/
+          if-no-files-found: error
+          retention-days: 14
+  cpp-provenance:
+    if: github.repository == 'kvnloo/Open3D'
+    runs-on: macos-14
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Collect source, recorded job, and failure evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m pip install requests
+          python validation/tsdf7580/provenance.py collect
+      - uses: actions/download-artifact@v4
+        with:
+          name: open3d-build-macos-14
+          run-id: 35965027760
+          github-token: ${{ github.token }}
+          path: archived-build
+      - name: Restore the original build without recompilation
+        run: |
+          shasum -a 256 archived-build/build.tar.xz > results/provenance/build-archive-sha256.txt
+          tar -xf archived-build/build.tar.xz
+          find build -name CMakeCache.txt -o -name '*VoxelBlockGrid*' > results/provenance/build-file-locations.txt
+          grep -E 'CMAKE_HOME_DIRECTORY|OPEN3D_VERSION|CMAKE_BUILD_TYPE|CMAKE_CXX_COMPILER' build/CMakeCache.txt > results/provenance/cmake-identity.txt
+      - name: List and rerun the archived C++ cases without changing expectations
+        env:
+          OMP_NUM_THREADS: '1'
+        run: |
+          export DYLD_LIBRARY_PATH="$GITHUB_WORKSPACE/build/lib:/opt/homebrew/lib:${DYLD_LIBRARY_PATH:-}"
+          python validation/tsdf7580/provenance.py inspect
+          echo 'Archived test failures are recorded, not treated as a passing validation verdict.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tsdf-7580-cpp-provenance-evidence
+          path: results/provenance/
+          if-no-files-found: error
+          retention-days: 14
