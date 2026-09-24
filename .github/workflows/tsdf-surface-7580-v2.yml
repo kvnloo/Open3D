@@ -45,11 +45,10 @@ jobs:
           run-id: 35965027760
           github-token: ${{ github.token }}
           path: wheels/candidate
-      - name: Make the shared fixture compatible with this build's extraction API
+      - name: Prepare the same nondegenerate extraction fixture for both builds
         run: |
-          # Attempt 1 failed in the unchanged build while assigning an empty
-          # color tensor during point extraction. Allocate a neutral color
-          # attribute for BOTH runs. No production code is changed.
+          # Preserve failed-attempt evidence. Both adjustments below concern
+          # fixture construction, not the production depth-lookup correction.
           python - <<'PY'
           from pathlib import Path
           p = Path('validation/tsdf7580/surface_probe.py')
@@ -61,6 +60,11 @@ jobs:
           old = "                grid.attribute('tsdf')[:] = 0.\n"
           assert text.count(old) == 1
           text = text.replace(old, old + "                grid.attribute('color')[:] = 0.\n")
+          # The existing point extractor uses tsdf_i * tsdf_o < 0: an exactly
+          # voxel-aligned flat plane has no strict sign-changing edge. Move
+          # the analytic plane off that grid coincidence in BOTH inputs.
+          assert text.count('1.25') == 3
+          text = text.replace('1.25', '1.253')
           p.write_text(text)
           Path('results/effective_surface_probe.py').write_text(text)
           PY
