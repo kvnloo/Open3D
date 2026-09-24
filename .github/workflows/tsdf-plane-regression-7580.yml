@@ -1,0 +1,142 @@
+name: TSDF 7580 compact plane regression
+on:
+  push:
+    branches: [ci/tsdf-plane-regression-7580]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  paired-regression:
+    if: github.repository == 'kvnloo/Open3D'
+    runs-on: macos-14
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      VECLIB_MAXIMUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Verify original artifact identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p results
+          git rev-parse HEAD > results/validation-commit.txt
+          python - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          expected = [
+              (10798136279, 35964996507, '8f35b3fa05711aba1e57eb44291fb191ebbb0c50', 'sha256:66fd08bb9d47a492e56817c9b6d67be669b861632d2485617ffb51295537cea3'),
+              (10798350959, 35965027760, '9e2229ab12ec8a33491484c487105388408c45e7', 'sha256:5eaab32d3680dd7a1095c00e96babb0547ff18d84c932a79d21d65aa5bd64254')]
+          for artifact_id, run_id, sha, digest in expected:
+              req = urllib.request.Request(f'https://api.github.com/repos/kvnloo/Open3D/actions/artifacts/{artifact_id}', headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  data = json.load(response)
+              assert data['id'] == artifact_id and not data['expired']
+              assert data['workflow_run']['id'] == run_id
+              assert data['workflow_run']['head_sha'] == sha
+              assert data['digest'] == digest
+              Path(f'results/artifact-{artifact_id}.json').write_text(json.dumps(data, indent=2))
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: open3d-0.20.0+337b457-cp314-cp314-macosx_11_0_arm64.whl
+          run-id: 35964996507
+          github-token: ${{ github.token }}
+          path: wheels/control
+      - uses: actions/download-artifact@v4
+        with:
+          name: open3d-0.20.0+203aff2-cp314-cp314-macosx_11_0_arm64.whl
+          run-id: 35965027760
+          github-token: ${{ github.token }}
+          path: wheels/candidate
+      - name: Install dependencies and format regression with repository style
+        run: |
+          python -m pip install wheels/control/*.whl pytest==8.3.5 'yapf==0.43.*'
+          python - <<'PY'
+          import ast, hashlib
+          from pathlib import Path
+          from yapf.yapflib.yapf_api import FormatFile
+          path = Path('python/test/t/geometry/test_voxel_block_grid_surface.py')
+          original = path.read_text()
+          formatted, _, _ = FormatFile(str(path))
+          assert ast.dump(ast.parse(original)) == ast.dump(ast.parse(formatted))
+          path.write_text(formatted)
+          Path('results/test_voxel_block_grid_surface.py').write_text(formatted)
+          Path('results/test-sha256.txt').write_text(hashlib.sha256(path.read_bytes()).hexdigest() + '\n')
+          PY
+          git diff > results/formatting-only.patch
+          shasum -a 256 wheels/*/*.whl > results/wheel-sha256.txt
+      - name: Execute identical tests against control and candidate repeatedly
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, subprocess, sys, time
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          paths = ['python/test/t/geometry/test_voxel_block_grid.py', 'python/test/t/geometry/test_voxel_block_grid_surface.py']
+          hashes = {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths}
+          baseline_deps = None
+          summary = []
+          for label, variant in [('control-1', 'control'), ('candidate-1', 'candidate'), ('candidate-2', 'candidate'), ('candidate-3', 'candidate'), ('control-2', 'control')]:
+              wheels = list(Path('wheels', variant).glob('*.whl'))
+              assert len(wheels) == 1
+              subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-deps', '--force-reinstall', str(wheels[0])], check=True)
+              expected = '0.20.0+337b457' if variant == 'control' else '0.20.0+203aff2'
+              identity = subprocess.check_output([sys.executable, '-c', 'import json, open3d as o; print(json.dumps({"version": o.__version__, "path": o.__file__, "build": o._build_config}))'], text=True)
+              assert json.loads(identity)['version'] == expected
+              Path(f'results/{label}-identity.json').write_text(identity)
+              freeze = subprocess.check_output([sys.executable, '-m', 'pip', 'freeze'], text=True)
+              Path(f'results/{label}-environment.txt').write_text(freeze)
+              deps = [line for line in freeze.splitlines() if not line.lower().startswith('open3d')]
+              if baseline_deps is None:
+                  baseline_deps = deps
+              assert deps == baseline_deps
+              assert hashes == {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths}
+              start = time.monotonic()
+              proc = subprocess.run([sys.executable, '-m', 'pytest', *paths, '-q', '--durations=10', '-o', 'junit_family=legacy', f'--junitxml=results/{label}.xml'], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+              elapsed = time.monotonic() - start
+              Path(f'results/{label}.log').write_text(proc.stdout)
+              print(proc.stdout)
+              root = ET.parse(f'results/{label}.xml').getroot()
+              cases = root.findall('.//testcase')
+              failed = [case.attrib['name'] for case in cases if case.find('failure') is not None]
+              errors = [case.attrib['name'] for case in cases if case.find('error') is not None]
+              skipped = [case.attrib['name'] for case in cases if case.find('skipped') is not None]
+              assert len(cases) == 25 and not errors and not skipped, (len(cases), errors, skipped)
+              planes = []
+              for case in cases:
+                  if case.attrib['name'].startswith('test_integrate_plane_surface'):
+                      props = {p.attrib['name']: p.attrib['value'] for p in case.findall('./properties/property')}
+                      assert int(props['covered_rays']) == 825
+                      planes.append({'name': case.attrib['name'], 'rms_mm': float(props['rms_mm']), 'bias_mm': float(props['bias_mm']), 'seconds': float(case.attrib['time'])})
+              assert len(planes) == 5
+              row = {'label': label, 'exit_code': proc.returncode, 'tests': len(cases), 'failed': failed, 'elapsed_seconds': elapsed, 'planes': planes}
+              summary.append(row)
+              Path('results/summary.json').write_text(json.dumps(summary, indent=2))
+              if variant == 'control':
+                  assert proc.returncode == 1 and len(failed) == 12, failed
+                  assert sum(name.startswith('test_integrate_plane_surface') for name in failed) == 4
+                  assert not any('flat-' in name for name in failed)
+              else:
+                  assert proc.returncode == 0 and not failed, failed
+          print(json.dumps(summary, indent=2))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write('## Compact TSDF regression, pinned macOS ARM64 CPU wheels\n\n')
+              stream.write('Controls: 12 expected failures / 13 passes each. Candidate: 25 passes in each of three runs. Five plane cases require full coverage of 825 fixed rays. No reconstruction counts were changed.\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tsdf-7580-compact-plane-regression
+          path: results/
+          if-no-files-found: error
+          retention-days: 14
