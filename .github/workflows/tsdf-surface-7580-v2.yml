@@ -45,10 +45,8 @@ jobs:
           run-id: 35965027760
           github-token: ${{ github.token }}
           path: wheels/candidate
-      - name: Prepare the same nondegenerate extraction fixture for both builds
+      - name: Prepare identical fixtures and independent fixed-ray queries
         run: |
-          # Preserve failed-attempt evidence. Both adjustments below concern
-          # fixture construction, not the production depth-lookup correction.
           python - <<'PY'
           from pathlib import Path
           p = Path('validation/tsdf7580/surface_probe.py')
@@ -60,13 +58,21 @@ jobs:
           old = "                grid.attribute('tsdf')[:] = 0.\n"
           assert text.count(old) == 1
           text = text.replace(old, old + "                grid.attribute('color')[:] = 0.\n")
-          # The existing point extractor uses tsdf_i * tsdf_o < 0: an exactly
-          # voxel-aligned flat plane has no strict sign-changing edge. Move
-          # the analytic plane off that grid coincidence in BOTH inputs.
+          # Avoid the existing exact-zero edge-extraction degeneracy in BOTH inputs.
           assert text.count('1.25') == 3
           text = text.replace('1.25', '1.253')
+          assert text.count('import numpy as np') == 1
+          text = text.replace('import numpy as np', 'import numpy as np\nfrom ray_metric import measure_rays')
+          old = "                          'triangles': int(mesh.triangle.indices.shape[0]),\n"
+          assert text.count(old) == 1
+          text = text.replace(old, old + "                          'fixed_rays': measure_rays(mesh, data['plane'], data['k'], data['wh']),\n")
+          old = "        p, q = x['mesh'], y['mesh']\n"
+          assert text.count(old) == 1
+          text = text.replace(old, "        p, q = x['fixed_rays'], y['fixed_rays']\n        assert p['rays_sha256'] == q['rays_sha256']\n        assert p['covered_rays'] == q['covered_rays'] == 1728\n")
+          text = text.replace('# Fixed-input TSDF surface measurements', '# Fixed-ray TSDF surface measurements')
           p.write_text(text)
           Path('results/effective_surface_probe.py').write_text(text)
+          Path('results/ray_metric.py').write_text(Path('validation/tsdf7580/ray_metric.py').read_text())
           PY
           git diff -- validation/tsdf7580/surface_probe.py > results/fixture-adjustment.patch
           python -m py_compile validation/tsdf7580/*.py
@@ -76,7 +82,7 @@ jobs:
           python -m pip install wheels/control/*.whl pytest==8.3.5
           python -m pip freeze > results/control-environment.txt
           python validation/tsdf7580/surface_probe.py generate
-          shasum -a 256 validation/tsdf7580/surface_probe.py > results/probe-sha256.txt
+          shasum -a 256 validation/tsdf7580/surface_probe.py validation/tsdf7580/ray_metric.py > results/probe-sha256.txt
       - name: Measure original reconstruction
         run: python validation/tsdf7580/surface_probe.py probe --label control --version 0.20.0+337b457 --output results/control.json 2>&1 | tee results/control.log
       - name: Swap only Open3D and verify unchanged environment
