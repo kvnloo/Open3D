@@ -1,0 +1,170 @@
+name: Camera intrinsics 7579 A-B
+
+on:
+  push:
+    branches: [ci/camera-intrinsics-7579]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: camera-intrinsics-7579-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-ab:
+    if: github.repository == 'kvnloo/Open3D'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      OPEN3D_CPU_RENDERING: 'true'
+      EGL_PLATFORM: surfaceless
+      LIBGL_ALWAYS_SOFTWARE: 'true'
+      TEST_FILE: python/test/visualization/test_camera_intrinsics.py
+      TARGET_FILE: cpp/open3d/visualization/rendering/filament/FilamentCamera.cpp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build and Python dependencies
+        run: |
+          mkdir -p results
+          bash util/install_deps_ubuntu.sh assume-yes 2>&1 | tee results/dependencies.log
+          python -m pip install -r python/requirements.txt pytest==8.3.5 yapf==0.43.0 setuptools wheel
+      - name: Verify baseline and format the test without changing its meaning
+        run: |
+          test "$(git rev-parse HEAD~1)" = "0a42717f915ba3e00c7a78de899ca756f337c680"
+          test "$(git hash-object "$TARGET_FILE")" = "072a89ec42ef55270ff903e172a5330040a78045"
+          python - <<'PY'
+          import ast
+          import os
+          from pathlib import Path
+          from yapf.yapflib.yapf_api import FormatCode
+          path = Path(os.environ['TEST_FILE'])
+          before = path.read_text()
+          after, _ = FormatCode(before, style_config='.style.yapf')
+          assert ast.dump(ast.parse(before)) == ast.dump(ast.parse(after))
+          path.write_text(after)
+          Path('results/formatted-test.py').write_text(after)
+          PY
+          git diff --check
+          sha256sum "$TEST_FILE" > results/test.sha256
+          git rev-parse HEAD > results/experiment-head.txt
+          git hash-object "$TARGET_FILE" > results/baseline-source-blob.txt
+          echo "PYTHONPATH=$GITHUB_WORKSPACE/build/lib/python_package" >> "$GITHUB_ENV"
+      - name: Configure the CPU renderer build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON -DBUILD_PYTHON_MODULE=ON -DBUILD_GUI=ON \
+            -DPython3_EXECUTABLE="$(command -v python)" \
+            -DBUILD_CUDA_MODULE=OFF -DBUILD_SYCL_MODULE=OFF \
+            -DBUILD_WEBRTC=OFF -DBUILD_JUPYTER_EXTENSION=OFF \
+            -DBUILD_PYTORCH_OPS=OFF -DBUILD_TENSORFLOW_OPS=OFF \
+            -DBUNDLE_OPEN3D_ML=OFF -DBUILD_EXAMPLES=OFF \
+            -DBUILD_UNIT_TESTS=OFF -DBUILD_BENCHMARKS=OFF \
+            -DBUILD_ISPC_MODULE=OFF -DWITH_IPP=OFF -DWITH_STUBGEN=OFF \
+            2>&1 | tee results/configure.log
+      - name: Build unchanged production code
+        run: |
+          cmake --build build --target pybind --parallel 2 2>&1 | tee results/baseline-build.log
+          cmake --build build --target python-package --parallel 2 2>&1 | tee results/baseline-package.log
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import open3d as o3d
+          expected = Path(os.environ['PYTHONPATH']).resolve()
+          assert Path(o3d.__file__).resolve().is_relative_to(expected)
+          print('Source-built Open3D:', o3d.__version__, o3d.__file__)
+          print(o3d._build_config)
+          PY
+      - name: Measure baseline (numerical assertion failures expected)
+        run: |
+          set +e
+          python -m pytest -vv "$TEST_FILE" --junitxml=results/baseline.xml 2>&1 | tee results/baseline-tests.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "$status" > results/baseline-exit.txt
+      - name: Apply only the candidate camera correction
+        run: |
+          test "$(git hash-object "$TARGET_FILE")" = "072a89ec42ef55270ff903e172a5330040a78045"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path(os.environ['TARGET_FILE'])
+          text = path.read_text()
+          replacements = {
+              'custom_proj[2][0] = 1.0 - 2.0 * intrinsics(0, 2) / width;':
+              'custom_proj[2][0] = 1.0 - 2.0 * (intrinsics(0, 2) + 0.5) / width;',
+              'custom_proj[2][1] = -1.0 + 2.0 * intrinsics(1, 2) / height;':
+              'custom_proj[2][1] = -1.0 + 2.0 * (intrinsics(1, 2) + 0.5) / height;',
+          }
+          for old, new in replacements.items():
+              assert text.count(old) == 1, old
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+          git diff --check
+          test "$(git diff --numstat -- "$TARGET_FILE")" = "$(printf '2\t2\t%s' "$TARGET_FILE")"
+          git diff -- "$TARGET_FILE" > results/candidate.patch
+          git hash-object "$TARGET_FILE" > results/candidate-source-blob.txt
+          sha256sum -c results/test.sha256
+      - name: Rebuild candidate incrementally in the same environment
+        run: |
+          cmake --build build --target pybind --parallel 2 2>&1 | tee results/candidate-build.log
+          cmake --build build --target python-package --parallel 2 2>&1 | tee results/candidate-package.log
+      - name: Measure candidate with identical tests and inputs
+        run: |
+          sha256sum -c results/test.sha256
+          set +e
+          python -m pytest -vv "$TEST_FILE" --junitxml=results/candidate.xml 2>&1 | tee results/candidate-tests.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "$status" > results/candidate-exit.txt
+      - name: Require the intended before-and-after result
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          baseline = list(ET.parse('results/baseline.xml').iter('testcase'))
+          candidate = list(ET.parse('results/candidate.xml').iter('testcase'))
+          assert len(baseline) == len(candidate) == 13
+          assert Path('results/baseline-exit.txt').read_text().strip() == '1'
+          assert Path('results/candidate-exit.txt').read_text().strip() == '0'
+          assert all(c.find('skipped') is None and c.find('error') is None
+                     for c in baseline + candidate)
+          failures = [c for c in baseline if c.find('failure') is not None]
+          assert len(failures) == 12
+          for case in failures:
+              failure = case.find('failure')
+              details = failure.get('message', '') + (failure.text or '')
+              marker = ('CALIBRATION_PIXEL_MISMATCH' if
+                        'project_pixel_centers' in case.get('name', '') else
+                        'CALIBRATION_DEPTH_MISMATCH')
+              assert marker in details, details
+          assert all(c.find('failure') is None for c in candidate)
+          summary = ('Baseline: 12 intended calibration assertion failures; '
+                     'flat-plane control passed. Candidate: all 13 cases passed. '
+                     'Same tests and inputs; two production lines changed.\n')
+          Path('results/verdict.txt').write_text(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(summary)
+          print(summary)
+          PY
+      - name: Preserve evidence even if the experiment fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: camera-intrinsics-7579-evidence
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
