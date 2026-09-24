@@ -16,7 +16,6 @@ import pytest
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../..")
 from open3d_test import list_devices
 
-
 # A 3-row, 4-column image, with integer coordinates at pixel centers.
 # Expected indices are written explicitly: the test must not obtain its
 # answer by calling the same rounding code it is meant to check.
@@ -59,23 +58,27 @@ def test_integrate_nearest_depth_pixel(device, u, v, pixel):
     # Identity extrinsics and cx=u, cy=v project that voxel to exactly (u,v).
     blocks = o3c.Tensor([[0, 0, 1]], dtype=o3c.int32, device=device)
     intrinsic = o3c.Tensor([[1.0, 0.0, u], [0.0, 1.0, v], [0.0, 0.0, 1.0]],
-                          dtype=o3c.float64)
+                           dtype=o3c.float64)
     extrinsic = o3c.Tensor.eye(4, dtype=o3c.float64)
-    grid = o3d.t.geometry.VoxelBlockGrid(
-        attr_names=("tsdf", "weight"),
-        attr_dtypes=(o3c.float32, o3c.float32),
-        attr_channels=((1,), (1,)),
-        voxel_size=1.0,
-        block_resolution=1,
-        block_count=8,
-        device=device)
+    grid = o3d.t.geometry.VoxelBlockGrid(attr_names=("tsdf", "weight"),
+                                         attr_dtypes=(o3c.float32, o3c.float32),
+                                         attr_channels=((1,), (1,)),
+                                         voxel_size=1.0,
+                                         block_resolution=1,
+                                         block_count=8,
+                                         device=device)
 
     # Do not depend on uninitialized or newly allocated hash-map storage.
     grid.hashmap().activate(blocks)
     grid.attribute("tsdf")[:] = 0.0
     grid.attribute("weight")[:] = 0.0
-    grid.integrate(blocks, depth, intrinsic, extrinsic, depth_scale=1.0,
-                   depth_max=3.0, trunc_voxel_multiplier=1.0)
+    grid.integrate(blocks,
+                   depth,
+                   intrinsic,
+                   extrinsic,
+                   depth_scale=1.0,
+                   depth_max=3.0,
+                   trunc_voxel_multiplier=1.0)
 
     coords, flat_indices = grid.voxel_coordinates_and_flattened_indices()
     np.testing.assert_array_equal(coords.cpu().numpy(), [[0.0, 0.0, 1.0]])
@@ -92,4 +95,5 @@ def test_integrate_nearest_depth_pixel(device, u, v, pixel):
         x, y = pixel
         assert weight == 1.0
         assert tsdf == pytest.approx(float(depth_values[y, x, 0]) - 1.0,
-                                     rel=0.0, abs=1e-6)
+                                     rel=0.0,
+                                     abs=1e-6)
