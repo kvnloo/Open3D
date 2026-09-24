@@ -45,18 +45,15 @@ def _projection_result(calibration, moved, output):
     intrinsic = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
     extrinsic = np.eye(4)
     if moved:
-        extrinsic = np.array([[0.0, -1.0, 0.0, 0.25],
-                              [1.0, 0.0, 0.0, -0.5],
-                              [0.0, 0.0, 1.0, 0.125],
-                              [0.0, 0.0, 0.0, 1.0]])
-    camera_points = np.array([[-0.4, -0.2, 1.0], [0.0, 0.0, 1.0],
-                              [0.2, 0.3, 1.0], [-0.5, 0.2, 2.0],
-                              [0.0, 0.0, 2.0], [0.4, -0.3, 2.0],
-                              [-0.8, -0.5, 4.0], [0.0, 0.0, 4.0],
-                              [0.7, 0.6, 4.0]])
-    world = (np.linalg.inv(extrinsic) @
-             np.column_stack((camera_points, np.ones(len(camera_points)))).T).T
-    # Independent pinhole oracle: integer image coordinates are pixel centers.
+        extrinsic = np.array([[0.0, -1.0, 0.0, 0.25], [1.0, 0.0, 0.0, -0.5],
+                              [0.0, 0.0, 1.0, 0.125], [0.0, 0.0, 0.0, 1.0]])
+    camera_points = np.array([[-0.4, -0.2, 1.0], [0.0, 0.0,
+                                                  1.0], [0.2, 0.3, 1.0],
+                              [-0.5, 0.2, 2.0], [0.0, 0.0, 2.0],
+                              [0.4, -0.3, 2.0], [-0.8, -0.5, 4.0],
+                              [0.0, 0.0, 4.0], [0.7, 0.6, 4.0]])
+    world = (np.linalg.inv(extrinsic) @ np.column_stack(
+        (camera_points, np.ones(len(camera_points)))).T).T
     projected = (intrinsic @ camera_points.T).T
     expected = projected[:, :2] / projected[:, 2:3]
 
@@ -70,19 +67,20 @@ def _projection_result(calibration, moved, output):
     view = np.asarray(camera.get_view_matrix(), dtype=np.float64)
     clip = (projection @ view @ world.T).T
     ndc = clip[:, :2] / clip[:, 3:4]
-    # Viewport coordinates measure from the corner; array indices from centers.
     actual = np.column_stack(((ndc[:, 0] + 1.0) * width / 2.0 - 0.5,
                               (1.0 - ndc[:, 1]) * height / 2.0 - 0.5))
-    camera.set_projection(intrinsic, camera.get_near(), camera.get_far(),
-                          width, height)
+    camera.set_projection(intrinsic, camera.get_near(), camera.get_far(), width,
+                          height)
     repeated = np.asarray(camera.get_projection_matrix()).copy()
     camera.copy_from(camera)
     copied = np.asarray(camera.get_projection_matrix()).copy()
     with open(output, "w") as stream:
-        json.dump({"pixel_error": (actual - expected).tolist(),
-                   "reapply_error": float(np.max(np.abs(repeated - projection))),
-                   "copy_error": float(np.max(np.abs(copied - projection)))},
-                  stream)
+        json.dump(
+            {
+                "pixel_error": (actual - expected).tolist(),
+                "reapply_error": float(np.max(np.abs(repeated - projection))),
+                "copy_error": float(np.max(np.abs(copied - projection)))
+            }, stream)
 
 
 def _depth_result(sx, sy, output):
@@ -99,20 +97,22 @@ def _depth_result(sx, sy, output):
     render.setup_camera(intrinsic, np.eye(4), width, height)
     actual = np.asarray(render.render_to_depth_image(z_in_view_space=True))
     v, u = np.mgrid[:height, :width]
-    # Intersect each integer-centered pinhole ray with z = 2 + sx*x + sy*y.
     expected = 2.0 / (1.0 - sx * (u - cx) / fx - sy * (v - cy) / fy)
     actual, expected = actual[3:-3, 3:-3], expected[3:-3, 3:-3]
     complete = bool(np.all(np.isfinite(actual)) and np.all(actual > 0.0))
     with open(output, "w") as stream:
-        json.dump({"complete": complete,
-                   "max_depth_error": float(np.max(np.abs(actual - expected)))},
-                  stream)
+        json.dump(
+            {
+                "complete": complete,
+                "max_depth_error": float(np.max(np.abs(actual - expected)))
+            }, stream)
 
 
 def _run_probe(target, args, tmp_path):
     output = tmp_path / "result.json"
-    proc = multiprocessing.get_context("spawn").Process(
-        target=target, args=(*args, str(output)))
+    proc = multiprocessing.get_context("spawn").Process(target=target,
+                                                        args=(*args,
+                                                              str(output)))
     proc.start()
     proc.join(timeout=60)
     if proc.exitcode is None:
@@ -124,22 +124,25 @@ def _run_probe(target, args, tmp_path):
         return json.load(stream)
 
 
-@pytest.mark.parametrize("calibration", CALIBRATIONS,
-                         ids=["even-centered", "odd-centered",
-                              "even-offset", "odd-offset"])
+@pytest.mark.parametrize(
+    "calibration",
+    CALIBRATIONS,
+    ids=["even-centered", "odd-centered", "even-offset", "odd-offset"])
 @pytest.mark.parametrize("moved", [False, True], ids=["identity", "moved"])
 def test_intrinsics_project_pixel_centers(calibration, moved, tmp_path):
     result = _run_probe(_projection_result, (calibration, moved), tmp_path)
-    np.testing.assert_allclose(result["pixel_error"], 0.0, rtol=0.0, atol=1e-4,
+    np.testing.assert_allclose(result["pixel_error"],
+                               0.0,
+                               rtol=0.0,
+                               atol=1e-4,
                                err_msg="CALIBRATION_PIXEL_MISMATCH")
     assert result["reapply_error"] == 0.0
     assert result["copy_error"] == 0.0
 
 
-@pytest.mark.parametrize("sx,sy", [(0.0, 0.0), (0.4, 0.0), (-0.4, 0.0),
-                                   (0.0, 0.4), (0.0, -0.4)],
-                         ids=["flat", "tilt-x", "tilt-minus-x", "tilt-y",
-                              "tilt-minus-y"])
+@pytest.mark.parametrize(
+    "sx,sy", [(0.0, 0.0), (0.4, 0.0), (-0.4, 0.0), (0.0, 0.4), (0.0, -0.4)],
+    ids=["flat", "tilt-x", "tilt-minus-x", "tilt-y", "tilt-minus-y"])
 def test_intrinsics_render_analytic_plane(sx, sy, tmp_path):
     result = _run_probe(_depth_result, (sx, sy), tmp_path)
     assert result["complete"], "Plane did not cover the measured image region"
