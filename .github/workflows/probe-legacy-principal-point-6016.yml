@@ -1,0 +1,109 @@
+name: Probe legacy principal point 6016
+
+on:
+  push:
+    branches: [ci/probe-legacy-principal-point-6016]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    env:
+      OPEN3D_CPU_RENDERING: 'true'
+      EGL_PLATFORM: surfaceless
+      LIBGL_ALWAYS_SOFTWARE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install runtime dependencies
+        run: util/install_deps_ubuntu.sh assume-yes
+      - name: Download source-built CPU wheel
+        uses: actions/download-artifact@v4
+        with:
+          repository: kvnloo/Open3D
+          run-id: 36031031023
+          github-token: ${{ github.token }}
+          name: open3d-0.20.0+6af86e9-cp314-cp314-manylinux_2_35_x86_64.whl
+          path: wheel
+      - name: Install wheel
+        run: |
+          set -euxo pipefail
+          shopt -s nullglob
+          cpu=(wheel/open3d_cpu*.whl)
+          test ${#cpu[@]} -eq 1
+          python -m pip install "${cpu[0]}"
+      - name: Probe arbitrary principal-point round trip
+        run: |
+          cat > /tmp/probe6016.py <<'PY'
+          import json
+          import multiprocessing
+          import os
+
+          def child(queue):
+              os.environ.pop("DISPLAY", None)
+              os.environ.pop("WAYLAND_DISPLAY", None)
+              import numpy as np
+              import open3d as o3d
+
+              width, height = 300, 200
+              fx, fy, cx, cy = 100.0, 120.0, 100.0, 75.0
+
+              vis = o3d.visualization.Visualizer()
+              ok = vis.create_window(width=width, height=height, visible=False)
+              if not ok:
+                  queue.put({"create_window": False})
+                  return
+              ctr = vis.get_view_control()
+              cam = o3d.camera.PinholeCameraParameters()
+              cam.intrinsic = o3d.camera.PinholeCameraIntrinsic(
+                  width, height, fx, fy, cx, cy)
+              cam.extrinsic = np.eye(4)
+              accepted = ctr.convert_from_pinhole_camera_parameters(
+                  cam, allow_arbitrary=True)
+              out = ctr.convert_to_pinhole_camera_parameters()
+              got = out.intrinsic.intrinsic_matrix.copy()
+              vis.destroy_window()
+              queue.put({
+                  "create_window": True,
+                  "accepted": bool(accepted),
+                  "requested": [fx, fy, cx, cy],
+                  "returned": [
+                      float(got[0, 0]), float(got[1, 1]),
+                      float(got[0, 2]), float(got[1, 2])
+                  ],
+                  "principal_point_error": [
+                      float(got[0, 2] - cx), float(got[1, 2] - cy)
+                  ],
+              })
+
+          if __name__ == "__main__":
+              ctx = multiprocessing.get_context("spawn")
+              q = ctx.Queue()
+              p = ctx.Process(target=child, args=(q,))
+              p.start()
+              p.join(45)
+              if p.exitcode is None:
+                  p.kill()
+                  p.join()
+                  raise RuntimeError("probe timed out")
+              assert p.exitcode == 0, p.exitcode
+              result = q.get(timeout=5)
+              print("LEGACY_PRINCIPAL_POINT_PROBE", json.dumps(result, sort_keys=True))
+              assert result["create_window"], result
+              assert result["accepted"], result
+              # This probe documents current behavior; a centered result means
+              # #6016 still reproduces on current main.
+              expected_center = [(300.0 / 2.0) - 0.5, (200.0 / 2.0) - 0.5]
+              assert abs(result["returned"][2] - expected_center[0]) < 1e-6
+              assert abs(result["returned"][3] - expected_center[1]) < 1e-6
+              assert abs(result["principal_point_error"][0]) > 1.0
+              assert abs(result["principal_point_error"][1]) > 1.0
+          PY
+          python /tmp/probe6016.py
