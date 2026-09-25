@@ -106,14 +106,24 @@ jobs:
               assert n0 > 0
               assert n1 == n0, (n0, n1)
 
-              rendered = loaded.ray_cast(
-                  coords, intrinsic, extrinsic, width, height,
-                  ["depth"], depth_scale=1.0, depth_min=0.1,
-                  depth_max=3.0, weight_threshold=0.5,
-                  trunc_voxel_multiplier=8.0, range_map_down_factor=8)
-              out_depth = rendered["depth"].cpu().numpy()
-              finite = np.isfinite(out_depth) & (out_depth > 0)
-              assert finite.any()
+              def cast(vbg):
+                  result = vbg.ray_cast(
+                      coords, intrinsic, extrinsic, width, height,
+                      ["depth"], depth_scale=1.0, depth_min=0.1,
+                      depth_max=3.0, weight_threshold=0.5,
+                      trunc_voxel_multiplier=8.0, range_map_down_factor=8)
+                  return result["depth"].cpu().numpy()
+
+              before_depth = cast(grid)
+              after_depth = cast(loaded)
+              assert before_depth.shape == after_depth.shape
+              before_valid = np.isfinite(before_depth) & (before_depth > 0)
+              after_valid = np.isfinite(after_depth) & (after_depth > 0)
+              np.testing.assert_array_equal(after_valid, before_valid)
+              if before_valid.any():
+                  np.testing.assert_allclose(
+                      after_depth[before_valid], before_depth[before_valid],
+                      rtol=1e-5, atol=1e-6)
 
               report = {
                   "open3d_version": o3d.__version__,
@@ -124,7 +134,8 @@ jobs:
                   "negative_key_components_after": int((after < 0).sum()),
                   "points_before": n0,
                   "points_after": n1,
-                  "raycast_positive_finite_pixels": int(finite.sum()),
+                  "raycast_positive_finite_pixels_before": int(before_valid.sum()),
+                  "raycast_positive_finite_pixels_after": int(after_valid.sum()),
               }
               print("VBG_NEGATIVE_IO_PROBE", json.dumps(report, sort_keys=True))
           PY
