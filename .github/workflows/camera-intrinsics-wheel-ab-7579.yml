@@ -1,0 +1,107 @@
+name: Camera intrinsics wheel A-B 7579
+
+on:
+  push:
+    branches: [ci/camera-intrinsics-wheel-ab-7579]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  ab:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: control
+            source_ref: test/camera-intrinsics-7579
+            run_id: 36031031023
+            artifact: open3d-0.20.0+6af86e9-cp314-cp314-manylinux_2_35_x86_64.whl
+            expected_exit: 1
+            expected_failures: 12
+          - label: candidate
+            source_ref: fix/camera-intrinsics-7579
+            run_id: 36031033567
+            artifact: open3d-0.20.0+66f7b35-cp314-cp314-manylinux_2_35_x86_64.whl
+            expected_exit: 0
+            expected_failures: 0
+    env:
+      OPEN3D_CPU_RENDERING: 'true'
+      EGL_PLATFORM: surfaceless
+      LIBGL_ALWAYS_SOFTWARE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.source_ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install runtime dependencies
+        run: util/install_deps_ubuntu.sh assume-yes
+      - name: Download exact source-built wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          repository: kvnloo/Open3D
+          run-id: ${{ matrix.run_id }}
+          github-token: ${{ github.token }}
+          name: ${{ matrix.artifact }}
+          path: wheel
+      - name: Install CPU wheel
+        run: |
+          set -euxo pipefail
+          ls -lh wheel
+          python -m pip install -U pytest numpy
+          shopt -s nullglob
+          cpu=(wheel/open3d_cpu*.whl)
+          test ${#cpu[@]} -eq 1
+          python -m pip install "${cpu[0]}"
+          python - <<'PY'
+          import open3d as o3d
+          print(o3d.__version__, o3d.__file__)
+          print(o3d._build_config)
+          PY
+      - name: Run exact camera regression
+        run: |
+          set +e
+          python -m pytest -vv python/test/visualization/test_camera_intrinsics.py \
+            --junitxml=result.xml 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "$status" > exit.txt
+      - name: Require intended A-B result
+        env:
+          LABEL: ${{ matrix.label }}
+          EXPECTED_EXIT: ${{ matrix.expected_exit }}
+          EXPECTED_FAILURES: ${{ matrix.expected_failures }}
+        run: |
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          cases=list(ET.parse('result.xml').iter('testcase'))
+          assert len(cases)==13, len(cases)
+          assert all(c.find('skipped') is None and c.find('error') is None for c in cases)
+          failures=[c for c in cases if c.find('failure') is not None]
+          assert int(Path('exit.txt').read_text()) == int(os.environ['EXPECTED_EXIT'])
+          assert len(failures) == int(os.environ['EXPECTED_FAILURES']), [c.get('name') for c in failures]
+          if os.environ['LABEL']=='control':
+              for c in failures:
+                  f=c.find('failure')
+                  detail=(f.get('message','') + (f.text or ''))
+                  assert ('CALIBRATION_PIXEL_MISMATCH' in detail or
+                          'CALIBRATION_DEPTH_MISMATCH' in detail), detail[:1000]
+          print(os.environ['LABEL'], 'cases=', len(cases), 'failures=', len(failures))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: camera-7579-${{ matrix.label }}-evidence
+          path: |
+            result.xml
+            test.log
+            exit.txt
+          if-no-files-found: warn
+          retention-days: 14
