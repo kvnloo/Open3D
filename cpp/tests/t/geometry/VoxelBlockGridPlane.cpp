@@ -30,8 +30,8 @@ std::vector<double> IntegratePlaneErrors(const core::Device &device,
     const core::Device cpu("CPU:0");
     constexpr int width = 128, height = 96;
     constexpr double fx = 100.0, fy = 110.0, cx = 60.25, cy = 50.75;
-    const auto intrinsic = core::Tensor::Init<double>(
-            {{fx, 0, cx}, {0, fy, cy}, {0, 0, 1}});
+    const auto intrinsic =
+            core::Tensor::Init<double>({{fx, 0, cx}, {0, fy, cy}, {0, 0, 1}});
     const auto extrinsic = core::Tensor::Eye(4, core::Float64, cpu);
 
     std::vector<float> depths(width * height);
@@ -70,15 +70,14 @@ std::vector<double> IntegratePlaneErrors(const core::Device &device,
     std::vector<float> rays;
     for (int y = 0; y < 25; ++y) {
         for (int x = 0; x < 33; ++x) {
-            rays.insert(rays.end(), {float(-0.3 + 0.6 * x / 32),
-                                     float(-0.22 + 0.44 * y / 24), 4.f, 0.f,
-                                     0.f, -1.f});
+            rays.insert(rays.end(),
+                        {float(-0.3 + 0.6 * x / 32),
+                         float(-0.22 + 0.44 * y / 24), 4.f, 0.f, 0.f, -1.f});
         }
     }
-    const auto hits =
-            scene.CastRays(core::Tensor(rays, {kPlaneRayCount, 6},
-                                        core::Float32, cpu))
-                    .at("t_hit");
+    const auto hits = scene.CastRays(core::Tensor(rays, {kPlaneRayCount, 6},
+                                                  core::Float32, cpu))
+                              .at("t_hit");
     const float *distance = hits.GetDataPtr<float>();
     std::vector<double> errors(kPlaneRayCount);
     const double normal_length = std::sqrt(1.0 + sx * sx + sy * sy);
@@ -109,16 +108,15 @@ TEST_P(VoxelBlockGridPlanePermuteDevices, IntegratePlaneSurface) {
         ASSERT_TRUE(std::all_of(errors.begin(), errors.end(),
                                 [](double e) { return std::isfinite(e); }));
 
-        const double bias =
-                std::accumulate(errors.begin(), errors.end(), 0.0) /
-                errors.size();
-        const double rms = std::sqrt(std::inner_product(
-                errors.begin(), errors.end(), errors.begin(), 0.0) /
-                                     errors.size());
+        const double bias = std::accumulate(errors.begin(), errors.end(), 0.0) /
+                            errors.size();
+        const double rms =
+                std::sqrt(std::inner_product(errors.begin(), errors.end(),
+                                             errors.begin(), 0.0) /
+                          errors.size());
         const bool flat = slope[0] == 0 && slope[1] == 0;
 
-        EXPECT_LE(std::abs(bias),
-                  flat ? kFlatPlaneLimit : kPlaneBiasLimit);
+        EXPECT_LE(std::abs(bias), flat ? kFlatPlaneLimit : kPlaneBiasLimit);
         EXPECT_LE(rms, flat ? kFlatPlaneLimit : kPlaneRmsLimit);
     }
 }
