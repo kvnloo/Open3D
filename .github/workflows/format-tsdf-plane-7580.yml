@@ -25,3 +25,5 @@ jobs:
           base64 -w0 cpp/tests/t/geometry/VoxelBlockGridPlane.cpp
           echo
           echo '===END_FORMATTED_BASE64==='
+
+# trigger: validation rerun
