@@ -105,3 +105,5 @@ jobs:
             exit.txt
           if-no-files-found: warn
           retention-days: 14
+
+# trigger: validation rerun
