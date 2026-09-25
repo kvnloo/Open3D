@@ -20,10 +20,14 @@ jobs:
         run: |
           python util/check_style.py --apply --no_parallel
           git diff --check
-          test "$(git diff --name-only)" = "cpp/tests/t/geometry/VoxelBlockGridPlane.cpp"
-          echo '===FORMATTED_BASE64==='
-          base64 -w0 cpp/tests/t/geometry/VoxelBlockGridPlane.cpp
-          echo
-          echo '===END_FORMATTED_BASE64==='
+          printf '%s\n' cpp/tests/t/geometry/VoxelBlockGridPlane.cpp python/test/t/geometry/test_voxel_block_grid_surface.py > expected.txt
+          git diff --name-only | sort > actual.txt
+          diff -u expected.txt actual.txt
+          for file in cpp/tests/t/geometry/VoxelBlockGridPlane.cpp python/test/t/geometry/test_voxel_block_grid_surface.py; do
+            echo "===FORMATTED_BASE64:$file==="
+            base64 -w0 "$file"
+            echo
+            echo "===END_FORMATTED_BASE64:$file==="
+          done
 
 # trigger: validation rerun
