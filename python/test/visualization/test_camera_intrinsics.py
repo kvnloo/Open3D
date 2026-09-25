@@ -94,7 +94,13 @@ def _depth_result(sx, sy, output):
     material = rendering.MaterialRecord()
     material.shader = "defaultUnlit"
     render.scene.add_geometry("plane", _plane(o3d, sx, sy), material)
+    # Measure camera depth, independently of lighting and shadow-map behavior.
+    render.scene.scene.geometry_shadows("plane", False, False)
     render.setup_camera(intrinsic, np.eye(4), width, height)
+    camera = render.scene.camera
+    near, far = camera.get_near(), camera.get_far()
+    print("CALIBRATION_CAMERA_CLIP", sx, sy, near, far, flush=True)
+    assert np.isfinite([near, far]).all() and 0.0 < near < far
     actual = np.asarray(render.render_to_depth_image(z_in_view_space=True))
     v, u = np.mgrid[:height, :width]
     expected = 2.0 / (1.0 - sx * (u - cx) / fx - sy * (v - cy) / fy)
