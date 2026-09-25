@@ -13,6 +13,7 @@
 
 #include "core/CoreTest.h"
 #include "open3d/t/geometry/RaycastingScene.h"
+#include "open3d/t/geometry/TriangleMesh.h"
 #include "open3d/t/geometry/VoxelBlockGrid.h"
 
 namespace open3d {
@@ -57,7 +58,8 @@ std::vector<double> IntegratePlaneErrors(const core::Device &device,
             {"tsdf", "weight", "color"},
             {core::Float32, core::Float32, core::Float32}, {{1}, {1}, {3}},
             0.01f, 8, 640, device);
-    grid.GetHashMap().Activate(blocks);
+    core::Tensor block_indices, block_masks;
+    grid.GetHashMap().Activate(blocks, block_indices, block_masks);
     grid.GetAttribute("tsdf").Fill(0.f);
     grid.GetAttribute("weight").Fill(0.f);
     grid.GetAttribute("color").Fill(0.f);
