@@ -31,3 +31,13 @@ jobs:
           done
 
 # trigger: validation rerun
+
+      - name: Upload formatted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsdf-7580-formatted
+          path: |
+            cpp/tests/t/geometry/VoxelBlockGridPlane.cpp
+            python/test/t/geometry/test_voxel_block_grid_surface.py
+          if-no-files-found: error
+          retention-days: 14
