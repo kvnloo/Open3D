@@ -44,11 +44,10 @@ def test_integrate_plane_surface(device, sx, sy, record_property):
                                 indexing="ij"),
                     axis=-1)
     blocks = o3c.Tensor(keys.reshape(-1, 3).astype(np.int32), device=device)
-    grid = o3d.t.geometry.VoxelBlockGrid(attr_names=("tsdf", "weight",
-                                                     "color"),
+    grid = o3d.t.geometry.VoxelBlockGrid(attr_names=("tsdf", "weight", "color"),
                                          attr_dtypes=(o3c.float32, o3c.float32,
                                                       o3c.float32),
-                                         attr_channels=((1, ), (1, ), (3, )),
+                                         attr_channels=((1,), (1,), (3,)),
                                          voxel_size=voxel_size,
                                          block_resolution=8,
                                          block_count=blocks.shape[0],
@@ -68,8 +67,7 @@ def test_integrate_plane_surface(device, sx, sy, record_property):
     assert mesh.triangle.indices.shape[0] > 0
 
     # Compare the same world positions, not differently distributed vertices.
-    x, y = np.meshgrid(np.linspace(-0.5, 0.5, 33),
-                       np.linspace(-0.35, 0.35, 25))
+    x, y = np.meshgrid(np.linspace(-0.5, 0.5, 33), np.linspace(-0.35, 0.35, 25))
     rays = np.zeros((x.size, 6), dtype=np.float32)
     rays[:, 0], rays[:, 1] = x.ravel(), y.ravel()
     rays[:, 2], rays[:, 5] = 4.0, -1.0
