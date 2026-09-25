@@ -131,10 +131,16 @@ def _run_probe(target, args, tmp_path):
 @pytest.mark.parametrize("moved", [False, True], ids=["identity", "moved"])
 def test_intrinsics_project_pixel_centers(calibration, moved, tmp_path):
     result = _run_probe(_projection_result, (calibration, moved), tmp_path)
+    # The camera matrices are returned as float32. Promoting them above cannot
+    # recover precision lost during pose/projection setup. Budget a few float32
+    # rounding steps in pixel units for these bounded fixtures, not just a
+    # resolution-independent decimal tolerance. This stays below 0.00031 pixel;
+    # even a 0.01-pixel calibration error remains well outside the budget.
+    pixel_atol = 4 * np.finfo(np.float32).eps * max(calibration[:2])
     np.testing.assert_allclose(result["pixel_error"],
                                0.0,
                                rtol=0.0,
-                               atol=1e-4,
+                               atol=pixel_atol,
                                err_msg="CALIBRATION_PIXEL_MISMATCH")
     assert result["reapply_error"] == 0.0
     assert result["copy_error"] == 0.0
