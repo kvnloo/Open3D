@@ -1,0 +1,27 @@
+name: Format TSDF plane 7580
+
+on:
+  push:
+    branches: [ci/format-tsdf-plane-7580]
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -U -r python/requirements_style.txt
+      - name: Apply repository formatter
+        run: |
+          python util/check_style.py --apply --no-parallel
+          git diff --check
+          test "$(git diff --name-only)" = "cpp/tests/t/geometry/VoxelBlockGridPlane.cpp"
+          echo '===FORMATTED_BASE64==='
+          base64 -w0 cpp/tests/t/geometry/VoxelBlockGridPlane.cpp
+          echo
+          echo '===END_FORMATTED_BASE64==='
