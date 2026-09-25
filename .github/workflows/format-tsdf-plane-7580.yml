@@ -18,7 +18,7 @@ jobs:
       - run: pip install -U -r python/requirements_style.txt
       - name: Apply repository formatter
         run: |
-          python util/check_style.py --apply --no-parallel
+          python util/check_style.py --apply --no_parallel
           git diff --check
           test "$(git diff --name-only)" = "cpp/tests/t/geometry/VoxelBlockGridPlane.cpp"
           echo '===FORMATTED_BASE64==='
