@@ -1689,6 +1689,30 @@ TEST(TriangleMesh, RemoveTrianglesByMask) {
     ExpectMeshEQ(mesh_in, mesh_gt);
 }
 
+TEST(TriangleMesh, RemoveTrianglesByMaskPreservesMaterialIds) {
+    geometry::TriangleMesh mesh;
+    mesh.vertices_ = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+    mesh.triangles_ = {{0, 1, 2}, {1, 3, 2}, {0, 2, 3}, {0, 3, 1}};
+    mesh.triangle_material_ids_ = {0, 1, 2, 1};
+    ASSERT_TRUE(mesh.HasTriangleMaterialIds());
+
+    // The material ID follows each retained triangle, not its old index.
+    mesh.RemoveTrianglesByMask({false, true, false, true});
+    ASSERT_EQ(2u, mesh.triangles_.size());
+    EXPECT_EQ((std::vector<int>{0, 2}), mesh.triangle_material_ids_);
+    EXPECT_TRUE(mesh.HasTriangleMaterialIds());
+
+    // Indexed and all-triangle removal also use the same compaction path.
+    mesh.RemoveTrianglesByIndex({0});
+    ASSERT_EQ(1u, mesh.triangles_.size());
+    EXPECT_EQ((std::vector<int>{2}), mesh.triangle_material_ids_);
+    EXPECT_TRUE(mesh.HasTriangleMaterialIds());
+
+    mesh.RemoveTrianglesByMask({true});
+    EXPECT_TRUE(mesh.triangles_.empty());
+    EXPECT_TRUE(mesh.triangle_material_ids_.empty());
+}
+
 TEST(TriangleMesh, DeformAsRigidAsPossible) {
     geometry::TriangleMesh mesh_in;
     geometry::TriangleMesh mesh_gt;

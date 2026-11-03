@@ -285,7 +285,9 @@ Related to Taubin, *Curve and Surface Smoothing Without Shrinkage*, 1995.
             .def("remove_triangles_by_mask",
                  &TriangleMesh::RemoveTrianglesByMask,
                  "This function removes the triangles where triangle_mask is "
-                 "set to true.  Call remove_unreferenced_vertices to clean up "
+                 "set to true. Per-triangle normals, UVs, and material IDs "
+                 "are retained for surviving triangles. Call "
+                 "remove_unreferenced_vertices to clean up "
                  "vertices afterwards.",
                  "triangle_mask"_a)
             .def("remove_vertices_by_index",

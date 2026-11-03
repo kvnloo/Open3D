@@ -1552,6 +1552,7 @@ void TriangleMesh::RemoveTrianglesByMask(
 
     bool has_tri_normal = HasTriangleNormals();
     bool has_tri_uvs = HasTriangleUvs();
+    bool has_tri_material_ids = HasTriangleMaterialIds();
     int to_tidx = 0;
     for (size_t from_tidx = 0; from_tidx < triangles_.size(); ++from_tidx) {
         if (!triangle_mask[from_tidx]) {
@@ -1566,6 +1567,10 @@ void TriangleMesh::RemoveTrianglesByMask(
                 triangle_uvs_[to_tidx * 3 + 2] =
                         triangle_uvs_[from_tidx * 3 + 2];
             }
+            if (has_tri_material_ids) {
+                triangle_material_ids_[to_tidx] =
+                        triangle_material_ids_[from_tidx];
+            }
             to_tidx++;
         }
     }
@@ -1575,6 +1580,9 @@ void TriangleMesh::RemoveTrianglesByMask(
     }
     if (has_tri_uvs) {
         triangle_uvs_.resize(to_tidx * 3);
+    }
+    if (has_tri_material_ids) {
+        triangle_material_ids_.resize(to_tidx);
     }
 }
 

@@ -456,7 +456,8 @@ public:
 
     /// \brief This function removes the triangles that are masked in
     /// \p triangle_mask. Call \ref RemoveUnreferencedVertices to clean up
-    /// vertices afterwards.
+    /// vertices afterwards. Per-triangle normals, UVs, and material IDs
+    /// are retained for surviving triangles in their original order.
     ///
     /// \param triangle_mask Mask of triangles that should be removed.
     /// Should have same size as \ref triangles_.
