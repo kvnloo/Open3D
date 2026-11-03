@@ -92,8 +92,9 @@ The device of ohter box must be the same as the device of the current box.)");
 
     // Device transfers.
     aabb.def("to", &AxisAlignedBoundingBox::To,
-             "Transfer the axis-aligned box to a specified device.", "device"_a,
-             "copy"_a = false);
+             "Transfer the axis-aligned box to a specified device while "
+             "preserving its bounds, dtype, and color.",
+             "device"_a, "copy"_a = false);
     aabb.def("clone", &AxisAlignedBoundingBox::Clone,
              "Returns copy of the axis-aligned box on the same device.");
     aabb.def(

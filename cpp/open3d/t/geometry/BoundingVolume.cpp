@@ -58,9 +58,10 @@ AxisAlignedBoundingBox AxisAlignedBoundingBox::To(const core::Device &device,
     if (!copy && GetDevice() == device) {
         return *this;
     }
-    AxisAlignedBoundingBox box(device);
-    box.SetMaxBound(max_bound_.To(device, true));
-    box.SetMinBound(min_bound_.To(device, true));
+    // Construct with both bounds to avoid validating valid negative
+    // coordinates against a temporary zero-sized box.
+    AxisAlignedBoundingBox box(min_bound_.To(device, true),
+                               max_bound_.To(device, true));
     box.SetColor(color_.To(device, true));
     return box;
 }
