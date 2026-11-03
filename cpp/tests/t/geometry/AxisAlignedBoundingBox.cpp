@@ -109,6 +109,55 @@ TEST_P(AxisAlignedBoundingBoxPermuteDevicePairs, CopyDevice) {
               aabb.GetMinBound().GetDtype());
 }
 
+TEST_P(AxisAlignedBoundingBoxPermuteDevicePairs, CopyDeviceMixedSignBounds) {
+    core::Device dst_device;
+    core::Device src_device;
+    std::tie(dst_device, src_device) = GetParam();
+
+    // Valid bounds can have a negative maximum along one axis.
+    const core::Tensor min_bound =
+            core::Tensor::Init<float>({-2.0f, 1.0f, -1.0f}, src_device);
+    const core::Tensor max_bound =
+            core::Tensor::Init<float>({-0.5f, 2.0f, 0.5f}, src_device);
+    const core::Tensor color =
+            core::Tensor::Init<float>({0.25f, 0.5f, 0.75f}, src_device);
+    t::geometry::AxisAlignedBoundingBox box(min_bound, max_bound);
+    box.SetColor(color);
+
+    t::geometry::AxisAlignedBoundingBox copied =
+            box.To(dst_device, /*copy=*/true);
+
+    EXPECT_EQ(copied.GetDevice(), dst_device);
+    EXPECT_EQ(copied.GetDtype(), core::Float32);
+    EXPECT_FALSE(copied.IsEmpty());
+    EXPECT_TRUE(copied.GetMinBound().AllClose(min_bound.To(dst_device, true)));
+    EXPECT_TRUE(copied.GetMaxBound().AllClose(max_bound.To(dst_device, true)));
+    EXPECT_TRUE(copied.GetColor().AllClose(color.To(dst_device, true)));
+    EXPECT_DOUBLE_EQ(copied.Volume(), 2.25);
+}
+
+TEST(AxisAlignedBoundingBox, ClonePreservesFloat64AndNegativeBounds) {
+    const core::Device device("CPU:0");
+    const core::Tensor min_bound =
+            core::Tensor::Init<double>({-2.0, 1.0, -1.0}, device);
+    const core::Tensor max_bound =
+            core::Tensor::Init<double>({-0.5, 2.0, 0.5}, device);
+    const core::Tensor color =
+            core::Tensor::Init<double>({0.25, 0.5, 0.75}, device);
+    t::geometry::AxisAlignedBoundingBox box(min_bound, max_bound);
+    box.SetColor(color);
+
+    t::geometry::AxisAlignedBoundingBox clone = box.Clone();
+
+    EXPECT_EQ(clone.GetDevice(), device);
+    EXPECT_EQ(clone.GetDtype(), core::Float64);
+    EXPECT_FALSE(clone.IsEmpty());
+    EXPECT_TRUE(clone.GetMinBound().AllClose(min_bound));
+    EXPECT_TRUE(clone.GetMaxBound().AllClose(max_bound));
+    EXPECT_TRUE(clone.GetColor().AllClose(color));
+    EXPECT_DOUBLE_EQ(clone.Volume(), 2.25);
+}
+
 TEST_P(AxisAlignedBoundingBoxPermuteDevices, Clone_Clear_IsEmpty) {
     core::Device device = GetParam();
 

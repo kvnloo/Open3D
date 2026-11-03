@@ -69,6 +69,7 @@ public:
     core::Dtype GetDtype() const { return dtype_; }
 
     /// \brief Transfer the AxisAlignedBoundingBox to a specified device.
+    /// Preserves bounds, data type and color, including negative coordinates.
     /// \param device The targeted device to convert to.
     /// \param copy If true, a new AxisAlignedBoundingBox is always created; If
     /// false, the copy is avoided when the original AxisAlignedBoundingBox is
