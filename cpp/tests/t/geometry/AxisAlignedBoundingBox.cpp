@@ -109,7 +109,6 @@ TEST_P(AxisAlignedBoundingBoxPermuteDevicePairs, CopyDevice) {
               aabb.GetMinBound().GetDtype());
 }
 
-
 TEST_P(AxisAlignedBoundingBoxPermuteDevicePairs, CopyDeviceMixedSignBounds) {
     core::Device dst_device;
     core::Device src_device;
