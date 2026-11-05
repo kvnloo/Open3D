@@ -255,6 +255,10 @@ std::shared_ptr<TriangleMesh> TriangleMesh::FilterSmoothSimple(
     mesh->vertex_normals_.resize(vertex_normals_.size());
     mesh->vertex_colors_.resize(vertex_colors_.size());
     mesh->triangles_ = triangles_;
+    // Smoothing changes vertex attributes, not the source triangle order.
+    if (HasTriangleMaterialIds()) {
+        mesh->triangle_material_ids_ = triangle_material_ids_;
+    }
     mesh->adjacency_list_ = adjacency_list_;
     if (!mesh->HasAdjacencyList()) {
         mesh->ComputeAdjacencyList();
@@ -323,6 +327,10 @@ std::shared_ptr<TriangleMesh> TriangleMesh::FilterSmoothLaplacian(
     mesh->vertex_normals_.resize(vertex_normals_.size());
     mesh->vertex_colors_.resize(vertex_colors_.size());
     mesh->triangles_ = triangles_;
+    // Smoothing changes vertex attributes, not the source triangle order.
+    if (HasTriangleMaterialIds()) {
+        mesh->triangle_material_ids_ = triangle_material_ids_;
+    }
     mesh->adjacency_list_ = adjacency_list_;
     if (!mesh->HasAdjacencyList()) {
         mesh->ComputeAdjacencyList();
@@ -389,6 +397,10 @@ std::shared_ptr<TriangleMesh> TriangleMesh::FilterSmoothTaubin(
     mesh->vertex_normals_.resize(vertex_normals_.size());
     mesh->vertex_colors_.resize(vertex_colors_.size());
     mesh->triangles_ = triangles_;
+    // Smoothing changes vertex attributes, not the source triangle order.
+    if (HasTriangleMaterialIds()) {
+        mesh->triangle_material_ids_ = triangle_material_ids_;
+    }
     mesh->adjacency_list_ = adjacency_list_;
     if (!mesh->HasAdjacencyList()) {
         mesh->ComputeAdjacencyList();
@@ -735,6 +747,7 @@ TriangleMesh &TriangleMesh::RemoveDuplicatedTriangles() {
     std::unordered_map<Index3, size_t, utility::hash_tuple<Index3>>
             triangle_to_old_index;
     bool has_tri_normal = HasTriangleNormals();
+    bool has_tri_material_ids = HasTriangleMaterialIds();
     size_t old_triangle_num = triangles_.size();
     size_t k = 0;
     for (size_t i = 0; i < old_triangle_num; i++) {
@@ -762,11 +775,15 @@ TriangleMesh &TriangleMesh::RemoveDuplicatedTriangles() {
             triangle_to_old_index[index] = i;
             triangles_[k] = triangles_[i];
             if (has_tri_normal) triangle_normals_[k] = triangle_normals_[i];
+            if (has_tri_material_ids) {
+                triangle_material_ids_[k] = triangle_material_ids_[i];
+            }
             k++;
         }
     }
     triangles_.resize(k);
     if (has_tri_normal) triangle_normals_.resize(k);
+    if (has_tri_material_ids) triangle_material_ids_.resize(k);
     if (k < old_triangle_num && HasAdjacencyList()) {
         ComputeAdjacencyList();
     }
@@ -827,6 +844,7 @@ TriangleMesh &TriangleMesh::RemoveDegenerateTriangles() {
                 "that are not handled in this function");
     }
     bool has_tri_normal = HasTriangleNormals();
+    bool has_tri_material_ids = HasTriangleMaterialIds();
     size_t old_triangle_num = triangles_.size();
     size_t k = 0;
     for (size_t i = 0; i < old_triangle_num; i++) {
@@ -835,11 +853,15 @@ TriangleMesh &TriangleMesh::RemoveDegenerateTriangles() {
             triangle(2) != triangle(0)) {
             triangles_[k] = triangles_[i];
             if (has_tri_normal) triangle_normals_[k] = triangle_normals_[i];
+            if (has_tri_material_ids) {
+                triangle_material_ids_[k] = triangle_material_ids_[i];
+            }
             k++;
         }
     }
     triangles_.resize(k);
     if (has_tri_normal) triangle_normals_.resize(k);
+    if (has_tri_material_ids) triangle_material_ids_.resize(k);
     if (k < old_triangle_num && HasAdjacencyList()) {
         ComputeAdjacencyList();
     }
