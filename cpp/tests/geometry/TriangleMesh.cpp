@@ -2784,12 +2784,14 @@ TEST(TriangleMesh, QuadricDecimationPreservesTriangleMaterialIds) {
     mesh.triangles_ = {{0, 1, 2}, {3, 4, 5}};
     mesh.triangle_material_ids_ = {7, 29};
 
-    auto unchanged = mesh.SimplifyQuadricDecimation(2);
+    auto unchanged = mesh.SimplifyQuadricDecimation(
+            2, std::numeric_limits<double>::infinity(), 1.0);
     ASSERT_TRUE(unchanged->HasTriangleMaterialIds());
     EXPECT_EQ((std::vector<int>{7, 29}),
               unchanged->triangle_material_ids_);
 
-    auto reduced = mesh.SimplifyQuadricDecimation(1);
+    auto reduced = mesh.SimplifyQuadricDecimation(
+            1, std::numeric_limits<double>::infinity(), 1.0);
     ASSERT_EQ(1u, reduced->triangles_.size());
     ASSERT_TRUE(reduced->HasTriangleMaterialIds());
     EXPECT_EQ((std::vector<int>{29}), reduced->triangle_material_ids_);
@@ -2798,7 +2800,8 @@ TEST(TriangleMesh, QuadricDecimationPreservesTriangleMaterialIds) {
 
 TEST(TriangleMesh, EmptySimplificationHasNoTriangleMaterialIds) {
     geometry::TriangleMesh empty;
-    auto decimated = empty.SimplifyQuadricDecimation(0);
+    auto decimated = empty.SimplifyQuadricDecimation(
+            0, std::numeric_limits<double>::infinity(), 1.0);
     EXPECT_TRUE(decimated->triangles_.empty());
     EXPECT_TRUE(decimated->triangle_material_ids_.empty());
     EXPECT_FALSE(decimated->HasTriangleMaterialIds());
