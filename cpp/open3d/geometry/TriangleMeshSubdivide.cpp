@@ -28,6 +28,11 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SubdivideMidpoint(
     mesh->vertex_normals_ = vertex_normals_;
     mesh->triangles_ = triangles_;
 
+    const bool has_triangle_material_ids = HasTriangleMaterialIds();
+    if (has_triangle_material_ids) {
+        mesh->triangle_material_ids_ = triangle_material_ids_;
+    }
+
     bool has_vert_normal = HasVertexNormals();
     bool has_vert_color = HasVertexColors();
 
@@ -66,6 +71,10 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SubdivideMidpoint(
                            utility::hash_eigen<Eigen::Vector2i>>
                 new_verts;
         std::vector<Eigen::Vector3i> new_triangles(4 * mesh->triangles_.size());
+        std::vector<int> new_material_ids;
+        if (has_triangle_material_ids) {
+            new_material_ids.resize(4 * mesh->triangles_.size());
+        }
         for (size_t tidx = 0; tidx < mesh->triangles_.size(); ++tidx) {
             const auto& triangle = mesh->triangles_[tidx];
             int vidx0 = triangle(0);
@@ -82,8 +91,18 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SubdivideMidpoint(
                     Eigen::Vector3i(vidx12, vidx2, vidx20);
             new_triangles[tidx * 4 + 3] =
                     Eigen::Vector3i(vidx01, vidx12, vidx20);
+            if (has_triangle_material_ids) {
+                // Every child inherits the material of its parent triangle.
+                for (int child = 0; child < 4; ++child) {
+                    new_material_ids[tidx * 4 + child] =
+                            mesh->triangle_material_ids_[tidx];
+                }
+            }
         }
         mesh->triangles_ = new_triangles;
+        if (has_triangle_material_ids) {
+            mesh->triangle_material_ids_ = std::move(new_material_ids);
+        }
     }
 
     if (HasTriangleNormals()) {
@@ -110,6 +129,7 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SubdivideLoop(
 
     bool has_vert_normal = HasVertexNormals();
     bool has_vert_color = HasVertexColors();
+    const bool has_triangle_material_ids = HasTriangleMaterialIds();
 
     auto UpdateVertex = [&](int vidx,
                             const std::shared_ptr<TriangleMesh>& old_mesh,
@@ -297,6 +317,9 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SubdivideLoop(
     old_mesh->vertex_colors_ = vertex_colors_;
     old_mesh->vertex_normals_ = vertex_normals_;
     old_mesh->triangles_ = triangles_;
+    if (has_triangle_material_ids) {
+        old_mesh->triangle_material_ids_ = triangle_material_ids_;
+    }
 
     for (int iter = 0; iter < number_of_iterations; ++iter) {
         size_t n_new_vertices =
@@ -311,6 +334,9 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SubdivideLoop(
             new_mesh->vertex_colors_.resize(n_new_vertices);
         }
         new_mesh->triangles_.resize(n_new_triangles);
+        if (has_triangle_material_ids) {
+            new_mesh->triangle_material_ids_.resize(n_new_triangles);
+        }
 
         EdgeNewVertMap new_verts;
         EdgeTrianglesMap new_edge_to_triangles;
@@ -342,6 +368,13 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SubdivideLoop(
                            new_edge_to_triangles, new_vertex_neighbours);
             InsertTriangle(int(tidx) * 4 + 3, vidx01, vidx12, vidx20, new_mesh,
                            new_edge_to_triangles, new_vertex_neighbours);
+            if (has_triangle_material_ids) {
+                // Keep the parent material ID on all four new triangles.
+                for (int child = 0; child < 4; ++child) {
+                    new_mesh->triangle_material_ids_[tidx * 4 + child] =
+                            old_mesh->triangle_material_ids_[tidx];
+                }
+            }
         }
 
         old_mesh = std::move(new_mesh);

@@ -375,6 +375,8 @@ public:
     /// Function to subdivide triangle mesh using the simple midpoint algorithm.
     /// Each triangle is subdivided into four triangles per iteration and the
     /// new vertices lie on the midpoint of the triangle edges.
+    /// Per-triangle material IDs are retained on all children when present.
+    /// Triangle UVs are not subdivided.
     /// \param number_of_iterations defines a single iteration splits each
     /// triangle into four triangles that cover the same surface.
     std::shared_ptr<TriangleMesh> SubdivideMidpoint(
@@ -383,6 +385,8 @@ public:
     /// Function to subdivide triangle mesh using Loop's scheme.
     /// Cf. Charles T. Loop, "Smooth subdivision surfaces based on triangles",
     /// 1987. Each triangle is subdivided into four triangles per iteration.
+    /// Per-triangle material IDs are retained on all children when present.
+    /// Triangle UVs are not subdivided.
     /// \param number_of_iterations defines a single iteration splits each
     /// triangle into four triangles that cover the same surface.
     std::shared_ptr<TriangleMesh> SubdivideLoop(int number_of_iterations) const;

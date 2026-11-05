@@ -245,12 +245,15 @@ Related to Taubin, *Curve and Surface Smoothing Without Shrinkage*, 1995.
                  "number_of_points"_a, "init_factor"_a = 5, "pcl"_a = nullptr,
                  "use_triangle_normal"_a = false)
             .def("subdivide_midpoint", &TriangleMesh::SubdivideMidpoint,
-                 "Function subdivide mesh using midpoint algorithm.",
+                 "Function subdivide mesh using midpoint algorithm. "
+                 "Per-triangle material IDs are preserved on children; "
+                 "triangle UVs are not subdivided.",
                  "number_of_iterations"_a = 1)
             .def("subdivide_loop", &TriangleMesh::SubdivideLoop,
-                 "Function subdivide mesh using Loop's algorithm. Loop, "
-                 "\"Smooth "
-                 "subdivision surfaces based on triangles\", 1987.",
+                 "Function subdivide mesh using Loop's algorithm. "
+                 "Per-triangle material IDs are preserved on children; "
+                 "triangle UVs are not subdivided. Loop, "
+                 "\"Smooth subdivision surfaces based on triangles\", 1987.",
                  "number_of_iterations"_a = 1)
             .def("simplify_vertex_clustering",
                  &TriangleMesh::SimplifyVertexClustering,

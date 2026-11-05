@@ -2741,5 +2741,34 @@ TEST(TriangleMesh, CreateMeshCoordinateFrame) {
     ExpectEQ(center_frame->GetCenter(), z_center);
 }
 
+TEST(TriangleMesh, SubdivisionPreservesTriangleMaterialIds) {
+    geometry::TriangleMesh mesh;
+    mesh.vertices_ = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+    mesh.triangles_ = {{0, 1, 2}, {1, 3, 2}};
+    mesh.triangle_material_ids_ = {2, 5};
+    ASSERT_TRUE(mesh.HasTriangleMaterialIds());
+
+    // A two-triangle mesh yields 2, 8, and 32 faces at iterations 0, 1, 2.
+    for (bool use_loop : {false, true}) {
+        for (int iterations = 0; iterations <= 2; ++iterations) {
+            auto result = use_loop ? mesh.SubdivideLoop(iterations)
+                                   : mesh.SubdivideMidpoint(iterations);
+            const int child_count = iterations == 0 ? 1 : iterations == 1 ? 4 : 16;
+            std::vector<int> expected_ids(child_count, 2);
+            expected_ids.insert(expected_ids.end(), child_count, 5);
+
+            EXPECT_EQ(expected_ids.size(), result->triangles_.size());
+            EXPECT_EQ(expected_ids, result->triangle_material_ids_);
+            EXPECT_TRUE(result->HasTriangleMaterialIds());
+        }
+
+        geometry::TriangleMesh empty_mesh;
+        auto empty_result = use_loop ? empty_mesh.SubdivideLoop(1)
+                                     : empty_mesh.SubdivideMidpoint(1);
+        EXPECT_TRUE(empty_result->triangles_.empty());
+        EXPECT_TRUE(empty_result->triangle_material_ids_.empty());
+    }
+}
+
 }  // namespace tests
 }  // namespace open3d
