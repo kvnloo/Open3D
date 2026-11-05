@@ -1204,6 +1204,61 @@ TEST(TriangleMesh, FilterSharpen) {
     ExpectEQ(mesh->vertices_, ref2);
 }
 
+
+TEST(TriangleMesh, SmoothingPreservesMaterialIds) {
+    geometry::TriangleMesh mesh;
+    mesh.vertices_ = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+    mesh.triangles_ = {{0, 1, 2}, {1, 3, 2}};
+    mesh.triangle_material_ids_ = {11, 19};
+    const std::vector<int> expected_ids{11, 19};
+    ASSERT_TRUE(mesh.HasTriangleMaterialIds());
+
+    // All three smoothers preserve faces, including with zero iterations.
+    for (int iterations : {0, 2}) {
+        auto simple = mesh.FilterSmoothSimple(iterations);
+        auto laplacian = mesh.FilterSmoothLaplacian(iterations, 0.5);
+        auto taubin = mesh.FilterSmoothTaubin(iterations, 0.5, -0.53);
+        for (const auto &result : {simple, laplacian, taubin}) {
+            ExpectEQ(mesh.triangles_, result->triangles_);
+            EXPECT_EQ(expected_ids, result->triangle_material_ids_);
+            EXPECT_TRUE(result->HasTriangleMaterialIds());
+        }
+    }
+    EXPECT_EQ(expected_ids, mesh.triangle_material_ids_);
+}
+
+TEST(TriangleMesh, DuplicatedTrianglesKeepFirstMaterialId) {
+    geometry::TriangleMesh mesh;
+    mesh.vertices_ = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+    mesh.triangles_ = {{0, 1, 2}, {1, 2, 0}, {0, 2, 3}, {0, 2, 1}};
+    mesh.triangle_material_ids_ = {3, 99, 7, 13};
+    ASSERT_TRUE(mesh.HasTriangleMaterialIds());
+
+    // Cyclic duplicates discard the second ID; reverse winding remains.
+    mesh.RemoveDuplicatedTriangles();
+    EXPECT_EQ((std::vector<int>{3, 7, 13}), mesh.triangle_material_ids_);
+    EXPECT_EQ(3u, mesh.triangles_.size());
+    EXPECT_TRUE(mesh.HasTriangleMaterialIds());
+}
+
+TEST(TriangleMesh, DegenerateTrianglesKeepSurvivorMaterialIds) {
+    geometry::TriangleMesh mesh;
+    mesh.vertices_ = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+    mesh.triangles_ = {{0, 1, 2}, {1, 1, 3}, {0, 2, 3}, {2, 2, 2}};
+    mesh.triangle_material_ids_ = {31, 41, 59, 26};
+    ASSERT_TRUE(mesh.HasTriangleMaterialIds());
+
+    mesh.RemoveDegenerateTriangles();
+    EXPECT_EQ((std::vector<int>{31, 59}), mesh.triangle_material_ids_);
+    EXPECT_EQ(2u, mesh.triangles_.size());
+    EXPECT_TRUE(mesh.HasTriangleMaterialIds());
+
+    // Removing unreferenced vertices does not alter per-face metadata.
+    mesh.RemoveUnreferencedVertices();
+    EXPECT_EQ((std::vector<int>{31, 59}), mesh.triangle_material_ids_);
+    EXPECT_TRUE(mesh.HasTriangleMaterialIds());
+}
+
 TEST(TriangleMesh, FilterSmoothSimple) {
     auto mesh = std::make_shared<geometry::TriangleMesh>();
     mesh->vertices_ = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}, {0, -1, 0}};

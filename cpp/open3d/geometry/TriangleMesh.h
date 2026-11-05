@@ -122,7 +122,7 @@ public:
 
     /// \brief Function that removes duplicated triangles, i.e., removes
     /// triangles that reference the same three vertices and have the same
-    /// orientation.
+    /// orientation. The first retained face keeps its material ID.
     TriangleMesh &RemoveDuplicatedTriangles();
 
     /// \brief This function removes vertices from the triangle mesh that are
@@ -133,6 +133,7 @@ public:
     /// reference a single vertex multiple times in a single triangle.
     ///
     /// They are usually the product of removing duplicated vertices.
+    /// Valid material IDs follow the surviving triangles.
     TriangleMesh &RemoveDegenerateTriangles();
 
     /// \brief Function that removes all non-manifold edges, by successively
@@ -169,6 +170,7 @@ public:
     /// being the input value, \f$v_o\f$ the output value, and \f$N\f$ is the
     /// set of adjacent neighbours.
     ///
+    /// Valid per-triangle material IDs are preserved; topology is unchanged.
     /// \param number_of_iterations defines the number of repetitions
     /// of this operation.
     std::shared_ptr<TriangleMesh> FilterSmoothSimple(
@@ -186,6 +188,7 @@ public:
     /// applying the same rule to vertex positions, normals, and/or colors
     /// (FilterScope) rather than positions only.
     ///
+    /// Valid per-triangle material IDs are preserved; topology is unchanged.
     /// \param number_of_iterations defines the number of repetitions
     /// of this operation.
     /// \param lambda_filter is the smoothing parameter.
@@ -202,6 +205,7 @@ public:
     /// paper in using triangle adjacency, inverse-distance Laplacian weights,
     /// and optional smoothing of normals/colors (FilterScope).
     ///
+    /// Valid per-triangle material IDs are preserved; topology is unchanged.
     /// \param number_of_iterations defines the number of repetitions
     /// of this operation.
     /// \param lambda_filter is the filter parameter

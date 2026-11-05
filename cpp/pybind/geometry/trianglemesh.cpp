@@ -77,7 +77,8 @@ void pybind_trianglemesh_definitions(py::module &m) {
                  &TriangleMesh::RemoveDuplicatedTriangles,
                  "Function that removes duplicated triangles, i.e., removes "
                  "triangles that reference the same three vertices and have "
-                 "the same orientation.")
+                 "the same orientation. The first retained triangle keeps "
+                 "its material ID when the input IDs are valid.")
             .def("remove_unreferenced_vertices",
                  &TriangleMesh::RemoveUnreferencedVertices,
                  "This function removes vertices from the triangle mesh that "
@@ -87,7 +88,8 @@ void pybind_trianglemesh_definitions(py::module &m) {
                  "Function that removes degenerate triangles, i.e., triangles "
                  "that references a single vertex multiple times in a single "
                  "triangle. They are usually the product of removing "
-                 "duplicated vertices.")
+                 "duplicated vertices. Material IDs follow the surviving "
+                 "triangles when input IDs are valid.")
             .def("remove_non_manifold_edges",
                  &TriangleMesh::RemoveNonManifoldEdges,
                  "Function that removes all non-manifold edges, by "
@@ -117,7 +119,8 @@ void pybind_trianglemesh_definitions(py::module &m) {
                  "average. :math:`v_o = \\frac{v_i + \\sum_{n \\in N} "
                  "v_n)}{|N| + 1}`, with :math:`v_i` being the input value, "
                  ":math:`v_o` the output value, and :math:`N` is the set of "
-                 "adjacent neighbours.",
+                 "adjacent neighbours. Valid per-triangle material IDs "
+                 "are preserved.",
                  "number_of_iterations"_a = 1,
                  py::arg_v("filter_scope", MeshBase::FilterScope::All,
                            "FilterScope.All"))
@@ -131,6 +134,8 @@ Each iteration: ``v <- v + lambda * (sum(w_n v_n)/sum(w_n) - v)`` with
 Laplacian Smoothing of Noisy Surface Meshes*, 1999; Open3D uses inverse
 Euclidean weights and can smooth positions, normals, and/or colors
 (``filter_scope``).
+
+Valid per-triangle material IDs are preserved without changing face order.
 )doc",
                  "number_of_iterations"_a = 1, "lambda_filter"_a = 0.5,
                  py::arg_v("filter_scope", MeshBase::FilterScope::All,
@@ -141,6 +146,8 @@ Taubin smoothing: two Laplacian passes per iteration (``lambda_filter`` then ``m
 
 Uses the same inverse-distance Laplacian as :func:`filter_smooth_laplacian`.
 Related to Taubin, *Curve and Surface Smoothing Without Shrinkage*, 1995.
+
+Valid per-triangle material IDs are preserved without changing face order.
 )doc",
                  "number_of_iterations"_a = 1, "lambda_filter"_a = 0.5,
                  "mu"_a = -0.53,
