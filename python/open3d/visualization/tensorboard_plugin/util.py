@@ -402,9 +402,18 @@ def _normalize(tensor):
     Return:
         tuple: (Normalized tensor, min value of tensor, max value of tensor) min
         and max are stretched to include 0 or 1 for degenerate tensors.
+
+    Example:
+        ``_normalize(o3d.core.Tensor([0, 128, 255],
+        dtype=o3d.core.uint8))[0]`` returns the original integer tensor.
     """
-    if tensor.dtype in (o3d.core.float32, o3d.core.float64, np.float32,
-                        np.float64):
+    # Open3D Dtype equality rejects NumPy scalar types. Compare dtypes
+    # within each tensor family to preserve integer data without errors.
+    if isinstance(tensor, o3d.core.Tensor):
+        is_float = tensor.dtype in (o3d.core.float32, o3d.core.float64)
+    else:
+        is_float = tensor.dtype in (np.float32, np.float64)
+    if is_float:
         m, M = tensor.min().item(), tensor.max().item()
         if M <= m + 1e-6:  # stretch degenerate range to include [0, 1]
             m, M = min(m, 0), max(M, 1)
