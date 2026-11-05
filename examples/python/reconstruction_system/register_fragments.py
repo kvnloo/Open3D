@@ -17,7 +17,8 @@ import open3d as o3d
 pyexample_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(pyexample_path)
 
-from open3d_example import join, get_file_list, make_clean_folder, draw_registration_result
+from open3d_example import (join, get_file_list, make_clean_folder,
+                            draw_registration_result, limit_open3d_threads)
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from optimize_posegraph import optimize_posegraph_for_scene
