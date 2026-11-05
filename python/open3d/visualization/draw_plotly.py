@@ -39,9 +39,31 @@ def get_point_object(geometry, point_sample_factor=1):
 
 
 def get_mesh_object(geometry,):
+    """Create a Plotly mesh, preserving vertex colors when available.
+
+    Example:
+        mesh = o3d.geometry.TriangleMesh.create_box()
+        mesh.paint_uniform_color((1.0, 0.0, 0.0))
+        trace = get_mesh_object(mesh)
+    """
     pl_mygrey = [0, 'rgb(153, 153, 153)'], [1., 'rgb(255,255,255)']
     triangles = np.asarray(geometry.triangles)
     vertices = np.asarray(geometry.vertices)
+
+    if geometry.has_vertex_colors():
+        # Plotly expects CSS colors while Open3D stores RGB floats in [0, 1].
+        colors = np.clip(np.rint(np.asarray(geometry.vertex_colors) * 255),
+                         0, 255).astype(np.uint8)
+        color_options = {
+            'vertexcolor': [
+                'rgb({},{},{})'.format(*color) for color in colors
+            ]
+        }
+    else:
+        color_options = {
+            'colorscale': pl_mygrey,
+            'intensity': vertices[:, 0]
+        }
 
     mesh_3d = go.Mesh3d(x=vertices[:, 0],
                         y=vertices[:, 1],
@@ -50,8 +72,7 @@ def get_mesh_object(geometry,):
                         j=triangles[:, 1],
                         k=triangles[:, 2],
                         flatshading=True,
-                        colorscale=pl_mygrey,
-                        intensity=vertices[:, 0],
+                        **color_options,
                         lighting=dict(ambient=0.18,
                                       diffuse=1,
                                       fresnel=0.1,
