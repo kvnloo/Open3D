@@ -104,7 +104,8 @@ void pybind_trianglemesh_definitions(py::module &m) {
                  "close triangle soups.",
                  "eps"_a)
             .def("filter_sharpen", &TriangleMesh::FilterSharpen,
-                 "Function to sharpen triangle mesh. The output value "
+                 "Function to sharpen triangle mesh. Triangle connectivity "
+                 "and valid material IDs are preserved. The output value "
                  "(:math:`v_o`) is the input value (:math:`v_i`) plus strength "
                  "times the input value minus he sum of he adjacent values. "
                  ":math:`v_o = v_i x strength (v_i * |N| - \\sum_{n \\in N} "
@@ -303,7 +304,9 @@ Related to Taubin, *Curve and Surface Smoothing Without Shrinkage*, 1995.
                  &TriangleMesh::DeformAsRigidAsPossible,
                  "This function deforms the mesh using the method by Sorkine "
                  "and Alexa, "
-                 "'As-Rigid-As-Possible Surface Modeling', 2007",
+                 "'As-Rigid-As-Possible Surface Modeling', 2007. "
+                 "Triangle connectivity and valid material IDs are "
+                 "preserved.",
                  "constraint_vertex_indices"_a, "constraint_vertex_positions"_a,
                  "max_iter"_a,
                  py::arg_v("energy",

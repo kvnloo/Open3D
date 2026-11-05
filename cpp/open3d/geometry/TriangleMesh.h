@@ -158,6 +158,7 @@ public:
     /// \param number_of_iterations defines the number of repetitions
     /// of this operation.
     /// \param strength - The strength of the filter.
+    /// \note Triangle topology and valid triangle material IDs are preserved.
     std::shared_ptr<TriangleMesh> FilterSharpen(
             int number_of_iterations,
             double strength,
@@ -490,7 +491,8 @@ public:
     /// functional.
     /// \param energy energy model that should be optimized
     /// \param smoothed_alpha alpha parameter of the smoothed ARAP model
-    /// \return The deformed TriangleMesh
+    /// \return The deformed TriangleMesh, with triangle topology and valid
+    /// triangle material IDs preserved.
     std::shared_ptr<TriangleMesh> DeformAsRigidAsPossible(
             const std::vector<int> &constraint_vertex_indices,
             const std::vector<Eigen::Vector3d> &constraint_vertex_positions,

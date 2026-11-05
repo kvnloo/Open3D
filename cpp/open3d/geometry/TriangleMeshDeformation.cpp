@@ -27,6 +27,10 @@ std::shared_ptr<TriangleMesh> TriangleMesh::DeformAsRigidAsPossible(
     auto prime = std::make_shared<TriangleMesh>();
     prime->vertices_ = this->vertices_;
     prime->triangles_ = this->triangles_;
+    // ARAP changes vertex positions without changing triangle order.
+    if (HasTriangleMaterialIds()) {
+        prime->triangle_material_ids_ = triangle_material_ids_;
+    }
 
     utility::LogDebug("[DeformAsRigidAsPossible] setting up S'");
     prime->ComputeAdjacencyList();

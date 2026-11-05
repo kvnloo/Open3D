@@ -184,6 +184,10 @@ std::shared_ptr<TriangleMesh> TriangleMesh::FilterSharpen(
     mesh->vertex_normals_.resize(vertex_normals_.size());
     mesh->vertex_colors_.resize(vertex_colors_.size());
     mesh->triangles_ = triangles_;
+    // Sharpening keeps face order, so valid material IDs stay aligned.
+    if (HasTriangleMaterialIds()) {
+        mesh->triangle_material_ids_ = triangle_material_ids_;
+    }
     mesh->adjacency_list_ = adjacency_list_;
     if (!mesh->HasAdjacencyList()) {
         mesh->ComputeAdjacencyList();
