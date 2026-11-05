@@ -207,3 +207,54 @@ def test_compute_rmse_point_to_plane_correspondence_mask_and_layout(
                                np.sqrt(13.0 / 3.0),
                                rtol=0.0,
                                atol=tolerance)
+
+
+@pytest.mark.parametrize("shape", [(3,), (3, 1)])
+def test_point_to_plane_rmse_excludes_invalid_from_denominator_cpu(shape):
+    device = o3c.Device("CPU:0")
+    source = o3d.t.geometry.PointCloud(
+        o3c.Tensor([[2.0, 0.0, 0.0], [99.0, 0.0, 0.0],
+                    [4.0, 0.0, 0.0]], o3c.float64, device))
+    target = o3d.t.geometry.PointCloud(
+        o3c.Tensor([[0.0, 0.0, 0.0]], o3c.float64, device))
+    target.point.normals = o3c.Tensor([[1.0, 0.0, 0.0]],
+                                      o3c.float64, device)
+    correspondences = o3c.Tensor([0, -1, 0], o3c.int64,
+                                 device).reshape(shape)
+    estimator = o3d.t.pipelines.registration.TransformationEstimationPointToPlane()
+    # Only squared residuals 4 and 16 count: sqrt((4 + 16) / 2).
+    np.testing.assert_allclose(
+        estimator.compute_rmse(source, target, correspondences),
+        np.sqrt(10.0), rtol=0, atol=1e-12)
+
+
+def test_point_to_plane_rmse_all_invalid_cpu():
+    device = o3c.Device("CPU:0")
+    source = o3d.t.geometry.PointCloud(
+        o3c.Tensor([[1.0, 0.0, 0.0]], o3c.float64, device))
+    target = o3d.t.geometry.PointCloud(
+        o3c.Tensor([[0.0, 0.0, 0.0]], o3c.float64, device))
+    target.point.normals = o3c.Tensor([[1.0, 0.0, 0.0]],
+                                      o3c.float64, device)
+    correspondences = o3c.Tensor([-1], o3c.int64, device)
+    estimator = o3d.t.pipelines.registration.TransformationEstimationPointToPlane()
+    # The current native implementation divides an empty sum (0) by zero.
+    assert np.isnan(estimator.compute_rmse(source, target, correspondences))
+
+
+def test_point_to_plane_rmse_mixed_valid_invalid_cpu():
+    device = o3c.Device("CPU:0")
+    source = o3d.t.geometry.PointCloud(
+        o3c.Tensor([[4.0, -3.0, 0.0], [200.0, 200.0, 0.0],
+                    [1.2, 1.6, 0.0]], o3c.float64, device))
+    target = o3d.t.geometry.PointCloud(
+        o3c.Tensor([[0.0, 0.0, 0.0]], o3c.float64, device))
+    target.point.normals = o3c.Tensor([[0.6, 0.8, 0.0]],
+                                      o3c.float64, device)
+    correspondences = o3c.Tensor([0, -1, 0], o3c.int64, device)
+    estimator = o3d.t.pipelines.registration.TransformationEstimationPointToPlane()
+    # Signed projections: 4*.6-3*.8=0 and 1.2*.6+1.6*.8=2.
+    # RMSE = sqrt((0**2 + 2**2) / 2) = sqrt(2).
+    np.testing.assert_allclose(
+        estimator.compute_rmse(source, target, correspondences),
+        np.sqrt(2.0), rtol=0, atol=1e-12)
