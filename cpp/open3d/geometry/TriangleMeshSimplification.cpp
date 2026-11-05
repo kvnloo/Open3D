@@ -199,10 +199,16 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SimplifyVertexClustering(
         }
     }
 
-    //  connect vertices
+    // Keep the first source ID when several faces collapse to one triangle.
+    const bool has_triangle_material_ids = HasTriangleMaterialIds();
+    std::unordered_map<Eigen::Vector3i, int,
+                       utility::hash_eigen<Eigen::Vector3i>>
+            clustered_material_ids;
     std::unordered_set<Eigen::Vector3i, utility::hash_eigen<Eigen::Vector3i>>
             triangles;
-    for (const auto& triangle : triangles_) {
+    for (size_t source_tidx = 0; source_tidx < triangles_.size();
+         ++source_tidx) {
+        const auto& triangle = triangles_[source_tidx];
         int vidx0 = voxel_vert_ind[GetVoxelIdx(vertices_[triangle(0)])];
         int vidx1 = voxel_vert_ind[GetVoxelIdx(vertices_[triangle(1)])];
         int vidx2 = voxel_vert_ind[GetVoxelIdx(vertices_[triangle(2)])];
@@ -226,13 +232,25 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SimplifyVertexClustering(
             vidx2 = tmp;
         }
 
-        triangles.emplace(Eigen::Vector3i(vidx0, vidx1, vidx2));
+        Eigen::Vector3i clustered_triangle(vidx0, vidx1, vidx2);
+        if (triangles.emplace(clustered_triangle).second &&
+            has_triangle_material_ids) {
+            clustered_material_ids.emplace(
+                    clustered_triangle, triangle_material_ids_[source_tidx]);
+        }
     }
 
     mesh->triangles_.resize(triangles.size());
+    if (has_triangle_material_ids) {
+        mesh->triangle_material_ids_.resize(triangles.size());
+    }
     int tidx = 0;
     for (const Eigen::Vector3i& triangle : triangles) {
         mesh->triangles_[tidx] = triangle;
+        if (has_triangle_material_ids) {
+            mesh->triangle_material_ids_[tidx] =
+                    clustered_material_ids.at(triangle);
+        }
         tidx++;
     }
 
@@ -259,6 +277,10 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SimplifyQuadricDecimation(
     mesh->vertex_normals_ = vertex_normals_;
     mesh->vertex_colors_ = vertex_colors_;
     mesh->triangles_ = triangles_;
+    const bool has_triangle_material_ids = HasTriangleMaterialIds();
+    if (has_triangle_material_ids) {
+        mesh->triangle_material_ids_ = triangle_material_ids_;
+    }
 
     std::vector<bool> vertices_deleted(vertices_.size(), false);
     std::vector<bool> triangles_deleted(triangles_.size(), false);
@@ -548,10 +570,17 @@ std::shared_ptr<TriangleMesh> TriangleMesh::SimplifyQuadricDecimation(
             mesh->triangles_[next_free](0) = vert_remapping[tria(0)];
             mesh->triangles_[next_free](1) = vert_remapping[tria(1)];
             mesh->triangles_[next_free](2) = vert_remapping[tria(2)];
+            if (has_triangle_material_ids) {
+                mesh->triangle_material_ids_[next_free] =
+                        mesh->triangle_material_ids_[idx];
+            }
             next_free++;
         }
     }
     mesh->triangles_.resize(next_free);
+    if (has_triangle_material_ids) {
+        mesh->triangle_material_ids_.resize(next_free);
+    }
 
     if (HasTriangleNormals()) {
         mesh->ComputeTriangleNormals();
