@@ -37,12 +37,14 @@ FileGeometry ReadFileGeometryTypeUSD(const std::string& path) {
 
 // Ref:
 // https://github.com/assimp/assimp/blob/master/include/assimp/postprocess.h
+// Keep the minimal import path free of vertex welding. Otherwise distinct
+// vertex indices with identical coordinates are merged even when disabled.
 const unsigned int kPostProcessFlags_compulsory =
-        aiProcess_JoinIdenticalVertices | aiProcess_SortByPType |
-        aiProcess_PreTransformVertices;
+        aiProcess_SortByPType | aiProcess_PreTransformVertices;
 
 const unsigned int kPostProcessFlags_fast =
-        kPostProcessFlags_compulsory | aiProcess_GenNormals |
+        kPostProcessFlags_compulsory | aiProcess_JoinIdenticalVertices |
+        aiProcess_GenNormals |
         aiProcess_Triangulate | aiProcess_GenUVCoords |
         aiProcess_RemoveRedundantMaterials | aiProcess_OptimizeMeshes;
 
