@@ -133,7 +133,7 @@ public:
     /// reference a single vertex multiple times in a single triangle.
     ///
     /// They are usually the product of removing duplicated vertices.
-    /// Material IDs follow the surviving triangles when the input IDs are valid.
+    /// Valid material IDs follow the surviving triangles.
     TriangleMesh &RemoveDegenerateTriangles();
 
     /// \brief Function that removes all non-manifold edges, by successively
