@@ -389,6 +389,9 @@ public:
 
     /// Function to simplify mesh using Vertex Clustering.
     /// The result can be a non-manifold mesh.
+    /// Surviving faces keep their source triangle material IDs, if present.
+    /// If multiple source faces cluster into one face, the first source
+    /// triangle in input order supplies that face's material ID.
     /// \param voxel_size - The size of the voxel within vertices are pooled.
     /// \param contraction - Method to aggregate vertex information. Average
     /// computes a simple average, Quadric minimizes the distance to the
@@ -400,6 +403,7 @@ public:
 
     /// Function to simplify mesh using Quadric Error Metric Decimation by
     /// Garland and Heckbert.
+    /// Surviving faces retain their source triangle material IDs, if present.
     /// \param target_number_of_triangles defines the number of triangles that
     /// the simplified mesh should have. It is not guaranteed that this number
     /// will be reached.

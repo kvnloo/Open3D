@@ -2741,5 +2741,80 @@ TEST(TriangleMesh, CreateMeshCoordinateFrame) {
     ExpectEQ(center_frame->GetCenter(), z_center);
 }
 
+TEST(TriangleMesh, ClusteringPreservesTriangleMaterialIds) {
+    geometry::TriangleMesh mesh;
+    mesh.vertices_ = {{0, 0, 0},       {1, 0, 0},       {0, 1, 0},
+                      {0.02, 0, 0},    {1.02, 0, 0},    {0, 1.02, 0},
+                      {10, 0, 0},      {11, 0, 0},      {10, 1, 0}};
+    mesh.triangles_ = {{0, 1, 2}, {3, 4, 5}, {0, 3, 2}, {6, 7, 8}};
+    mesh.triangle_material_ids_ = {11, 99, 777, 41};
+
+    for (auto contraction : {
+                 geometry::MeshBase::SimplificationContraction::Average,
+                 geometry::MeshBase::SimplificationContraction::Quadric}) {
+        auto simplified = mesh.SimplifyVertexClustering(0.1, contraction);
+        ASSERT_EQ(2u, simplified->triangles_.size());
+        ASSERT_TRUE(simplified->HasTriangleMaterialIds());
+
+        std::vector<std::pair<double, int>> region_ids;
+        for (size_t tidx = 0; tidx < simplified->triangles_.size(); ++tidx) {
+            const auto& triangle = simplified->triangles_[tidx];
+            const double x_center =
+                    (simplified->vertices_[triangle(0)].x() +
+                     simplified->vertices_[triangle(1)].x() +
+                     simplified->vertices_[triangle(2)].x()) /
+                    3.0;
+            region_ids.emplace_back(x_center,
+                                    simplified->triangle_material_ids_[tidx]);
+        }
+        std::sort(region_ids.begin(), region_ids.end());
+        EXPECT_LT(region_ids[0].first, 5.0);
+        EXPECT_GT(region_ids[1].first, 5.0);
+        EXPECT_EQ(11, region_ids[0].second);
+        EXPECT_EQ(41, region_ids[1].second);
+    }
+    EXPECT_EQ((std::vector<int>{11, 99, 777, 41}),
+              mesh.triangle_material_ids_);
+}
+
+TEST(TriangleMesh, QuadricDecimationPreservesTriangleMaterialIds) {
+    geometry::TriangleMesh mesh;
+    mesh.vertices_ = {{0, 0, 0},      {0.05, 0, 0}, {0, 0.05, 0},
+                      {100, 0, 0},    {105, 0, 0},  {100, 5, 0}};
+    mesh.triangles_ = {{0, 1, 2}, {3, 4, 5}};
+    mesh.triangle_material_ids_ = {7, 29};
+
+    auto unchanged = mesh.SimplifyQuadricDecimation(
+            2, std::numeric_limits<double>::infinity(), 1.0);
+    ASSERT_TRUE(unchanged->HasTriangleMaterialIds());
+    EXPECT_EQ((std::vector<int>{7, 29}),
+              unchanged->triangle_material_ids_);
+
+    auto reduced = mesh.SimplifyQuadricDecimation(
+            1, std::numeric_limits<double>::infinity(), 1.0);
+    ASSERT_EQ(1u, reduced->triangles_.size());
+    ASSERT_TRUE(reduced->HasTriangleMaterialIds());
+    EXPECT_EQ((std::vector<int>{29}), reduced->triangle_material_ids_);
+    EXPECT_EQ((std::vector<int>{7, 29}), mesh.triangle_material_ids_);
+}
+
+TEST(TriangleMesh, EmptySimplificationHasNoTriangleMaterialIds) {
+    geometry::TriangleMesh empty;
+    auto decimated = empty.SimplifyQuadricDecimation(
+            0, std::numeric_limits<double>::infinity(), 1.0);
+    EXPECT_TRUE(decimated->triangles_.empty());
+    EXPECT_TRUE(decimated->triangle_material_ids_.empty());
+    EXPECT_FALSE(decimated->HasTriangleMaterialIds());
+
+    for (auto contraction : {
+                 geometry::MeshBase::SimplificationContraction::Average,
+                 geometry::MeshBase::SimplificationContraction::Quadric}) {
+        auto clustered = empty.SimplifyVertexClustering(0.1, contraction);
+        EXPECT_TRUE(clustered->triangles_.empty());
+        EXPECT_TRUE(clustered->triangle_material_ids_.empty());
+        EXPECT_FALSE(clustered->HasTriangleMaterialIds());
+    }
+}
+
 }  // namespace tests
 }  // namespace open3d
