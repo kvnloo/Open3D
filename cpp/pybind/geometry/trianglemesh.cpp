@@ -254,7 +254,9 @@ Related to Taubin, *Curve and Surface Smoothing Without Shrinkage*, 1995.
                  "number_of_iterations"_a = 1)
             .def("simplify_vertex_clustering",
                  &TriangleMesh::SimplifyVertexClustering,
-                 "Function to simplify mesh using vertex clustering.",
+                 "Function to simplify mesh using vertex clustering. "
+                 "Surviving faces keep their source triangle material IDs. "
+                 "If faces coincide, the first source triangle's ID wins.",
                  "voxel_size"_a,
                  py::arg_v("contraction",
                            MeshBase::SimplificationContraction::Average,
@@ -262,7 +264,8 @@ Related to Taubin, *Curve and Surface Smoothing Without Shrinkage*, 1995.
             .def("simplify_quadric_decimation",
                  &TriangleMesh::SimplifyQuadricDecimation,
                  "Function to simplify mesh using Quadric Error Metric "
-                 "Decimation by Garland and Heckbert",
+                 "Decimation by Garland and Heckbert. Surviving faces "
+                 "retain their source triangle material IDs.",
                  "target_number_of_triangles"_a,
                  "maximum_error"_a = std::numeric_limits<double>::infinity(),
                  "boundary_weight"_a = 1.0)
