@@ -5,6 +5,10 @@
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
+#include <cstring>
+#include <limits>
+#include <string>
+
 #include "pybind/docstring.h"
 #include "pybind/open3d_pybind.h"
 
@@ -116,6 +120,61 @@ py_array_to_vectors_int64_eigen_allocator(py::array_t<int64_t> array) {
 
 namespace {
 
+// Eigen scalars are contiguous within an element, but vector elements may
+// include alignment padding. Pack each element individually rather than
+// copying past its scalar storage or relying on the vector's object layout.
+template <typename Vector>
+constexpr size_t EigenPickleElementBytes() {
+    using Element = typename Vector::value_type;
+    static_assert(Element::SizeAtCompileTime > 0,
+                  "Eigen pickle requires fixed-size elements");
+    return static_cast<size_t>(Element::SizeAtCompileTime) *
+           sizeof(typename Element::Scalar);
+}
+
+template <typename Vector>
+py::tuple EigenPickleState(const Vector &values) {
+    constexpr size_t kElementBytes = EigenPickleElementBytes<Vector>();
+    const size_t n = values.size();
+    if (n > std::numeric_limits<size_t>::max() / kElementBytes) {
+        throw py::value_error("Eigen pickle element count overflows size_t");
+    }
+    std::string buffer(n * kElementBytes, '\0');
+    for (size_t i = 0; i < n; ++i) {
+        std::memcpy(&buffer[i * kElementBytes], values[i].data(),
+                    kElementBytes);
+    }
+    return py::make_tuple(py::bytes(buffer), n);
+}
+
+// Check the exact byte count before resizing: malformed pickle state must
+// never be allowed to drive a short allocation followed by a larger memcpy.
+template <typename Vector>
+Vector EigenUnpickleState(py::tuple state) {
+    constexpr size_t kElementBytes = EigenPickleElementBytes<Vector>();
+    if (state.size() != 2) {
+        throw py::value_error("Eigen pickle state must contain two fields");
+    }
+    const std::string buffer = state[0].cast<std::string>();
+    const size_t n = state[1].cast<size_t>();
+    if (n > std::numeric_limits<size_t>::max() / kElementBytes) {
+        throw py::value_error("Eigen pickle element count overflows size_t");
+    }
+    if (buffer.size() != n * kElementBytes) {
+        throw py::value_error("Eigen pickle payload length does not match count");
+    }
+    Vector values;
+    if (n > values.max_size()) {
+        throw py::value_error("Eigen pickle element count exceeds max_size");
+    }
+    values.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+        std::memcpy(values[i].data(), buffer.data() + i * kElementBytes,
+                    kElementBytes);
+    }
+    return values;
+}
+
 template <typename Scalar,
           typename Vector = std::vector<Scalar>,
           typename holder_type = std::unique_ptr<Vector>>
@@ -177,6 +236,11 @@ py::class_<Vector, holder_type> pybind_eigen_vector_of_vector(
     vec.def("__deepcopy__", [](std::vector<EigenVector> &v, py::dict &memo) {
         return std::vector<EigenVector>(v);
     });
+    vec.def(py::pickle(
+            [](const Vector &v) { return EigenPickleState(v); },
+            [](py::tuple state) {
+                return EigenUnpickleState<Vector>(state);
+            }));
 
     // py::detail must be after custom constructor
     using Class_ = py::class_<Vector, std::unique_ptr<Vector>>;
@@ -301,6 +365,11 @@ py::class_<Vector, holder_type> pybind_eigen_vector_of_matrix(
             [](std::vector<EigenMatrix, EigenAllocator> &v, py::dict &memo) {
                 return std::vector<EigenMatrix, EigenAllocator>(v);
             });
+    vec.def(py::pickle(
+            [](const Vector &v) { return EigenPickleState(v); },
+            [](py::tuple state) {
+                return EigenUnpickleState<Vector>(state);
+            }));
 
     // py::detail must be after custom constructor
     using Class_ = py::class_<Vector, std::unique_ptr<Vector>>;
