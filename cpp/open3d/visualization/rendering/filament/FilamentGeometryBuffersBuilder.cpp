@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -253,16 +253,9 @@ std::unique_ptr<GeometryBuffersBuilder> GeometryBuffersBuilder::GetBuilder(
     using GT = t::geometry::Geometry::GeometryType;
 
     switch (geometry.GetGeometryType()) {
-        case GT::PointCloud: {
-            const t::geometry::PointCloud& pointcloud =
-                    static_cast<const t::geometry::PointCloud&>(geometry);
-            if (pointcloud.IsGaussianSplat()) {
-                return std::make_unique<TGaussianSplatBuffersBuilder>(
-                        pointcloud);
-            } else {
-                return std::make_unique<TPointCloudBuffersBuilder>(pointcloud);
-            }
-        }
+        case GT::PointCloud:
+            return std::make_unique<TPointCloudBuffersBuilder>(
+                    static_cast<const t::geometry::PointCloud&>(geometry));
         case GT::TriangleMesh:
             return std::make_unique<TMeshBuffersBuilder>(
                     static_cast<const t::geometry::TriangleMesh&>(geometry));

@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -172,8 +172,6 @@ VoxelGrid &VoxelGrid::operator+=(const VoxelGrid &voxelgrid) {
     std::unordered_map<Eigen::Vector3i, AvgColorVoxel,
                        utility::hash_eigen<Eigen::Vector3i>>
             voxelindex_to_accpoint;
-    Eigen::Vector3d ref_coord;
-    Eigen::Vector3i voxel_index;
     bool has_colors = voxelgrid.HasColors();
     for (const auto &it : voxelgrid.voxels_) {
         const geometry::Voxel &voxel = it.second;

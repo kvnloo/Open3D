@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -134,7 +134,11 @@ public:
     void SetOnSelectionChanged(
             std::function<void(ItemId)> on_selection_changed);
 
+    /// Returns whether an existing item is expanded.
+    /// Items default to expanded; unknown IDs return false.
     bool IsItemExpanded(ItemId item_id) const;
+    /// Sets the expanded state for an item at its next draw.
+    /// Unknown IDs are ignored.
     void SetItemExpanded(ItemId item_id, bool expanded);
 
 private:

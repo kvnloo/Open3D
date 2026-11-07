@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -34,6 +34,7 @@
 #include "open3d/geometry/BoundingVolume.h"
 #include "open3d/visualization/rendering/ColorGrading.h"
 #include "open3d/visualization/rendering/filament/FilamentCamera.h"
+#include "open3d/visualization/rendering/filament/FilamentEngine.h"
 #include "open3d/visualization/rendering/filament/FilamentEntitiesMods.h"
 #include "open3d/visualization/rendering/filament/FilamentResourceManager.h"
 #include "open3d/visualization/rendering/filament/FilamentScene.h"
@@ -96,6 +97,10 @@ FilamentView::~FilamentView() {
 #pragma clang diagnostic pop
 #endif
     view_->setScene(nullptr);
+    // Clear any custom render target so Filament's deferred view-destroy
+    // command doesn't hold a reference to a render target that may be freed
+    // before the engine processes its shutdown queue.
+    view_->setRenderTarget(nullptr);
 
     camera_.reset();
     engine_.destroy(view_);
@@ -240,6 +245,10 @@ void FilamentView::SetColorGrading(const ColorGradingParams& color_grading) {
             break;
     }
 
+    // Tone mapping is not supported in Filament's ColorGrading::Builder API.
+    // The toneMapping() method was removed/deprecated in newer versions of
+    // Filament, so this code is commented out. The ToneMapping parameter in
+    // ColorGradingParams is kept for API compatibility but is not applied.
     // filament::ColorGrading::ToneMapping tm =
     //         filament::ColorGrading::ToneMapping::LINEAR;
     // switch (color_grading.GetToneMapping()) {
@@ -310,6 +319,14 @@ void FilamentView::EnableViewCaching(bool enable) {
 
     if (caching_enabled_) {
         if (render_target_) {
+            // Tear down the GS render target BEFORE freeing color_buffer_.
+            // The GS RT uses color_buffer_ as its Filament color attachment;
+            // if color_buffer_ is freed first, Filament's handle allocator
+            // finds the attachment handle already freed and panics with a
+            // use-after-free assertion (e.g. on window maximize / resize).
+            if (scene_) {
+                scene_->InvalidateGaussianSplatOutput(*this);
+            }
             resource_mgr_.Destroy(render_target_);
             resource_mgr_.Destroy(color_buffer_);
             resource_mgr_.Destroy(depth_buffer_);
@@ -336,7 +353,26 @@ void FilamentView::EnableViewCaching(bool enable) {
 
 bool FilamentView::IsCached() const { return caching_enabled_; }
 
-TextureHandle FilamentView::GetColorBuffer() { return color_buffer_; }
+TextureHandle FilamentView::GetColorBuffer() {
+    // Metal keeps GS output as a transparent UI overlay, so the cached
+    // Filament texture remains the base scene color. Vulkan composites GS
+    // in-place and exposes the final shared color texture instead.
+    if (EngineInstance::GetBackendType() != RenderingType::kMetal && scene_ &&
+        scene_->UsesGaussianSplatOutput(*this)) {
+        auto color = scene_->GetColorBufferForView(*this);
+        if (color) return color;
+    }
+    return color_buffer_;
+}
+
+TextureHandle FilamentView::GetDepthBuffer() { return depth_buffer_; }
+
+TextureHandle FilamentView::GetGaussianSplatOverlay() {
+    if (scene_ && scene_->UsesGaussianSplatOutput(*this)) {
+        return scene_->GetColorBufferForView(*this);
+    }
+    return {};
+}
 
 void FilamentView::SetRenderTarget(const RenderTargetHandle render_target) {
     if (!render_target) {

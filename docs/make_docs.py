@@ -1,7 +1,7 @@
 # ----------------------------------------------------------------------------
 # -                        Open3D: www.open3d.org                            -
 # ----------------------------------------------------------------------------
-# Copyright (c) 2018-2024 www.open3d.org
+# Copyright (c) 2018-2026 www.open3d.org
 # SPDX-License-Identifier: MIT
 # ----------------------------------------------------------------------------
 
@@ -534,11 +534,9 @@ class JupyterDocsBuilder:
         # Execute Jupyter notebooks
         # Files that should not be executed.
         nb_direct_copy = [
-            'draw_plotly.ipynb',
-            'hashmap.ipynb',
-            'jupyter_visualization.ipynb',
-            't_icp_registration.ipynb',
-            'tensor.ipynb',
+            'draw_plotly.ipynb', 'hashmap.ipynb', 'jupyter_visualization.ipynb',
+            't_icp_registration.ipynb', 'tensor.ipynb',
+            'gaussian_splatting.ipynb'
         ]
 
         for nb_path in nb_paths:
