@@ -194,6 +194,20 @@ public:
                                                   double height,
                                                   double depth);
 
+    /// Creates a voxel grid given sparse 3D indices.
+    /// Duplicate indices produce one voxel with the average input color,
+    /// consistent with point-cloud voxelization's default AVG pooling.
+    ///
+    /// \param indices Grid index for each input color.
+    /// \param colors Input voxel colors, one per index.
+    /// \param origin Coordinate center of the VoxelGrid.
+    /// \param voxel_size Voxel edge length; must be greater than zero.
+    static std::shared_ptr<VoxelGrid> CreateFromSparseIndices(
+            const std::vector<Eigen::Vector3i> &indices,
+            const std::vector<Eigen::Vector3d> &colors,
+            const Eigen::Vector3d origin,
+            double voxel_size);
+
     /// \enum VoxelPoolingMode
     ///
     /// \brief Possible ways of determining voxel color from PointCloud.
