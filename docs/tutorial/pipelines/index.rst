@@ -4,6 +4,7 @@ Pipelines
 .. toctree::
 
     icp_registration
+    dcreg_icp
     ndt_registration
     generalized_icp
     robust_kernels
