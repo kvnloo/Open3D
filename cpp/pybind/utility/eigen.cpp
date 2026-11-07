@@ -1,9 +1,13 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
+
+#include <cstring>
+#include <limits>
+#include <string>
 
 #include "pybind/docstring.h"
 #include "pybind/open3d_pybind.h"
@@ -36,7 +40,12 @@ py::class_<Vector, holder_type> bind_vector_without_repr(
 //   bindings for each py array types.
 template <typename EigenVector>
 std::vector<EigenVector> py_array_to_vectors_double(
-        py::array_t<double, py::array::c_style | py::array::forcecast> array) {
+        py::array_t<double> array) {  // remove the restrictive flags here
+    // Ensure array is contiguous (C-style)
+    if (!(array.flags() & (py::array::c_style))) {
+        // Make a contiguous copy if necessary
+        array = py::array_t<double, py::array::c_style>(array);
+    }
     int64_t eigen_vector_size = EigenVector::SizeAtCompileTime;
     if (array.ndim() != 2 || array.shape(1) != eigen_vector_size) {
         throw py::cast_error();
@@ -53,8 +62,10 @@ std::vector<EigenVector> py_array_to_vectors_double(
 }
 
 template <typename EigenVector>
-std::vector<EigenVector> py_array_to_vectors_int(
-        py::array_t<int, py::array::c_style | py::array::forcecast> array) {
+std::vector<EigenVector> py_array_to_vectors_int(py::array_t<int> array) {
+    if (!(array.flags() & (py::array::c_style))) {
+        array = py::array_t<int, py::array::c_style>(array);
+    }
     int64_t eigen_vector_size = EigenVector::SizeAtCompileTime;
     if (array.ndim() != 2 || array.shape(1) != eigen_vector_size) {
         throw py::cast_error();
@@ -70,8 +81,10 @@ std::vector<EigenVector> py_array_to_vectors_int(
 template <typename EigenVector,
           typename EigenAllocator = Eigen::aligned_allocator<EigenVector>>
 std::vector<EigenVector, EigenAllocator>
-py_array_to_vectors_int_eigen_allocator(
-        py::array_t<int, py::array::c_style | py::array::forcecast> array) {
+py_array_to_vectors_int_eigen_allocator(py::array_t<int> array) {
+    if (!(array.flags() & (py::array::c_style))) {
+        array = py::array_t<int, py::array::c_style>(array);
+    }
     int64_t eigen_vector_size = EigenVector::SizeAtCompileTime;
     if (array.ndim() != 2 || array.shape(1) != eigen_vector_size) {
         throw py::cast_error();
@@ -87,8 +100,10 @@ py_array_to_vectors_int_eigen_allocator(
 template <typename EigenVector,
           typename EigenAllocator = Eigen::aligned_allocator<EigenVector>>
 std::vector<EigenVector, EigenAllocator>
-py_array_to_vectors_int64_eigen_allocator(
-        py::array_t<int64_t, py::array::c_style | py::array::forcecast> array) {
+py_array_to_vectors_int64_eigen_allocator(py::array_t<int64_t> array) {
+    if (!(array.flags() & (py::array::c_style))) {
+        array = py::array_t<int64_t, py::array::c_style>(array);
+    }
     int64_t eigen_vector_size = EigenVector::SizeAtCompileTime;
     if (array.ndim() != 2 || array.shape(1) != eigen_vector_size) {
         throw py::cast_error();
@@ -104,6 +119,61 @@ py_array_to_vectors_int64_eigen_allocator(
 }  // namespace pybind11
 
 namespace {
+
+// Eigen scalars are contiguous within an element, but vector elements may
+// include alignment padding. Pack each element individually rather than
+// copying past its scalar storage or relying on the vector's object layout.
+template <typename Vector>
+constexpr size_t EigenPickleElementBytes() {
+    using Element = typename Vector::value_type;
+    static_assert(Element::SizeAtCompileTime > 0,
+                  "Eigen pickle requires fixed-size elements");
+    return static_cast<size_t>(Element::SizeAtCompileTime) *
+           sizeof(typename Element::Scalar);
+}
+
+template <typename Vector>
+py::tuple EigenPickleState(const Vector &values) {
+    constexpr size_t kElementBytes = EigenPickleElementBytes<Vector>();
+    const size_t n = values.size();
+    if (n > std::numeric_limits<size_t>::max() / kElementBytes) {
+        throw py::value_error("Eigen pickle element count overflows size_t");
+    }
+    std::string buffer(n * kElementBytes, '\0');
+    for (size_t i = 0; i < n; ++i) {
+        std::memcpy(&buffer[i * kElementBytes], values[i].data(),
+                    kElementBytes);
+    }
+    return py::make_tuple(py::bytes(buffer), n);
+}
+
+// Check the exact byte count before resizing: malformed pickle state must
+// never be allowed to drive a short allocation followed by a larger memcpy.
+template <typename Vector>
+Vector EigenUnpickleState(py::tuple state) {
+    constexpr size_t kElementBytes = EigenPickleElementBytes<Vector>();
+    if (state.size() != 2) {
+        throw py::value_error("Eigen pickle state must contain two fields");
+    }
+    const std::string buffer = state[0].cast<std::string>();
+    const size_t n = state[1].cast<size_t>();
+    if (n > std::numeric_limits<size_t>::max() / kElementBytes) {
+        throw py::value_error("Eigen pickle element count overflows size_t");
+    }
+    if (buffer.size() != n * kElementBytes) {
+        throw py::value_error("Eigen pickle payload length does not match count");
+    }
+    Vector values;
+    if (n > values.max_size()) {
+        throw py::value_error("Eigen pickle element count exceeds max_size");
+    }
+    values.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+        std::memcpy(values[i].data(), buffer.data() + i * kElementBytes,
+                    kElementBytes);
+    }
+    return values;
+}
 
 template <typename Scalar,
           typename Vector = std::vector<Scalar>,
@@ -167,28 +237,9 @@ py::class_<Vector, holder_type> pybind_eigen_vector_of_vector(
         return std::vector<EigenVector>(v);
     });
     vec.def(py::pickle(
-            [](const std::vector<EigenVector> &v) {
-                const size_t n = v.size();
-                if (n == 0) {
-                    return py::make_tuple(py::bytes(""), 0);
-                }
-
-                const size_t rows = EigenVector::RowsAtCompileTime;
-                const char *raw = reinterpret_cast<const char *>(v[0].data());
-                return py::make_tuple(py::bytes(raw, n * rows * sizeof(Scalar)),
-                                      n);
-            },
-            [](py::tuple t) {
-                auto buffer = t[0].cast<std::string>();
-                auto n = t[1].cast<size_t>();
-                std::vector<EigenVector> p;
-                if (n == 0) {
-                    return p;
-                }
-
-                p.resize(n);
-                std::memcpy(p[0].data(), buffer.data(), buffer.size());
-                return p;
+            [](const Vector &v) { return EigenPickleState(v); },
+            [](py::tuple state) {
+                return EigenUnpickleState<Vector>(state);
             }));
 
     // py::detail must be after custom constructor
@@ -315,29 +366,9 @@ py::class_<Vector, holder_type> pybind_eigen_vector_of_matrix(
                 return std::vector<EigenMatrix, EigenAllocator>(v);
             });
     vec.def(py::pickle(
-            [](const std::vector<EigenMatrix, EigenAllocator> &v) {
-                const size_t n = v.size();
-                if (n == 0) {
-                    return py::make_tuple(py::bytes(""), 0);
-                }
-
-                const char *raw = reinterpret_cast<const char *>(v[0].data());
-                return py::make_tuple(
-                        py::bytes(raw, n * v[0].rows() * v[0].cols() *
-                                               sizeof(Scalar)),
-                        n);
-            },
-            [](py::tuple t) {
-                auto buffer = t[0].cast<std::string>();
-                auto n = t[1].cast<size_t>();
-                std::vector<EigenMatrix, EigenAllocator> p;
-                if (n == 0) {
-                    return p;
-                }
-
-                p.resize(n);
-                std::memcpy(p[0].data(), buffer.data(), buffer.size());
-                return p;
+            [](const Vector &v) { return EigenPickleState(v); },
+            [](py::tuple state) {
+                return EigenUnpickleState<Vector>(state);
             }));
 
     // py::detail must be after custom constructor

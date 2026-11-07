@@ -36,7 +36,7 @@ platforms:
 +==============================================+========+=======+=========+
 | Standalone mode server (C++/Python)          | Yes    | Yes   | Yes     |
 +----------------------------------------------+--------+-------+---------+
-| Jupyter mode server (Python)                 | Yes    | No    | Yes     |
+| Jupyter mode server (Python)                 | Yes    | Yes   | Yes     |
 +----------------------------------------------+--------+-------+---------+
 | Standalone/Jupyter mode client (web browser) | Yes    | Yes   | Yes     |
 +----------------------------------------------+--------+-------+---------+
@@ -50,9 +50,13 @@ Additional notes on compatibility:
   Intel XEON processors without integrated graphics. You'll need to add a
   discrete GPU to the instance and install the graphics driver to enable the web
   visualizer.
-- Web visualizer servers are not supported on the ARM platform yet. To get the
-  web visualizer working on ARM, you'll need to compile the WebRTC library from
-  source for ARM. See the ``3rdparty/webrtc`` folder for more details.
+- Standalone web visualizer servers are supported on macOS ARM64 using the
+  packaged ARM64 WebRTC libraries. ARM Linux still requires a WebRTC build from
+  source and is rejected by the current CMake configuration.
+- Jupyter mode uses the WebRTC bitmap window system, including on macOS ARM64.
+  The WebRTC backend must be enabled before the asynchronous GUI event loop is
+  imported; the native Cocoa window system cannot run on that background GUI
+  thread.
 - Google Colab and Kaggle notebook are not supported. You'll need to run you own
   Jupyter or JupyterLab server.
 - If you prefer using native windows (with blocking calls) instead of embedded
@@ -150,6 +154,11 @@ external IP address from the browser.
 Jupyter mode
 ------------
 
+The legacy ``open3d.j_visualizer.JVisualizer`` API is no longer provided.
+Use ``open3d.web_visualizer.draw`` instead. The WebVisualizer is an
+``ipywidgets`` widget backed by WebRTC, so it must be enabled in the Open3D
+package you are using.
+
 Install Jupyter with:
 
 .. code-block:: sh
@@ -164,8 +173,19 @@ or, you may also install JupyterLab instead:
     pip install jupyterlab
     jupyter-lab
 
+Official Open3D wheels include the Jupyter extension on supported platforms.
+For a package built from source, configure the build with
+``-DBUILD_JUPYTER_EXTENSION=ON``. This also requires WebRTC, the Python
+Jupyter dependencies, Node.js, and Yarn. If the extension is not present,
+importing ``open3d.web_visualizer`` raises an error explaining that it must be
+enabled at build time; installing ``ipywidgets`` after the Open3D build is not
+enough.
+
 Then, run the example notebook
 `docs/jupyter/visualization/jupyter_visualization.ipynb <https://github.com/isl-org/Open3D/blob/main/docs/jupyter/visualization/jupyter_visualization.ipynb>`_.
+
+For **3D Gaussian splatting** (``.splat`` / Gaussian PLY) in Jupyter, see
+`docs/jupyter/visualization/gaussian_splatting.ipynb <https://github.com/isl-org/Open3D/blob/main/docs/jupyter/visualization/gaussian_splatting.ipynb>`_.
 
 Unlike standalone mode, ``WEBRTC_IP`` and ``WEBRTC_PORT`` are not used in
 Jupyter mode. However, you might want to
@@ -184,6 +204,11 @@ Otherwise, running visualization in one cell will block the execution of the
 next cell. We provide Jupyter-specific helper functions to achieve non-blocking
 visualization. For instance, ``open3d.web_visualizer.draw`` is used instead of
 the regular ``open3d.visualization.draw`` in the example notebook above.
+
+The visualizer window includes interactive controls help. Open the ``Help``
+menu and select ``Show Controls...`` after the widget appears in the notebook.
+This is also a useful check that the WebRTC connection and the Jupyter widget
+are both working.
 
 Besides ``draw``, you may also create your own non-blocking visualization helper
 functions with the ``_AsyncEventLoop`` class. See
@@ -212,34 +237,20 @@ need to :
    .. code-block:: sh
 
      mkdir build && cd build
-     cmake -DBUILD_JUPYTER_EXTENSION ..
+        cmake -DBUILD_WEBRTC=ON -DBUILD_JUPYTER_EXTENSION=ON ..
      make install-pip-package -j$(nproc)
 
 Advanced topic: local server in airplane mode
 ------------------------------------------------
 
-When the computer has no active network interfaces (e.g. Wi-Fi is turned off and
-ethernet is unplugged, the machine only has the loopback ``lo`` interface),
-WebRTC may fail to work. In this case, we need to create a dummy interface.
-The workaround is tested on Ubuntu.
+Open3D enables loopback ICE candidates on all platforms, so a browser on the
+same computer can connect through ``localhost`` even when Wi-Fi and ethernet
+are unavailable. No dummy network interface is required.
 
 .. code-block:: sh
 
-    # Setup
-    sudo ip link add dummy0 type dummy
-    sudo ip addr add 1.1.1.1/24 dev dummy0
-    sudo ip link set dummy0 up
-
-    # Check interfaces
-    ip addr
-
-    # Do WebRTC things here
     python examples/python/visualization/draw_webrtc.py
     google-chrome http://localhost:8888  # Or, open the address in your browser
-
-    # Clean up
-    sudo ip link set dummy0 down
-    sudo ip link delete dummy0
 
 Advanced topic: TURN server
 ------------------------------
@@ -281,3 +292,17 @@ Here are some ideas to debug network issues:
 - If the visualization video has compression artifacts, you may be using a TURN
   server with insufficient bandwidth. Try switching to a TURN server with higher
   bandwidth or closer to your location.
+
+For a client and server running on the same machine, external STUN or TURN
+servers can be disabled explicitly:
+
+.. code-block:: sh
+
+    WEBRTC_STUN_SERVER="" python examples/python/visualization/draw_webrtc.py
+
+Loopback ICE candidates are always enabled. This host-only mode additionally
+disables external ICE servers, which can help when they are unreachable or
+local network interfaces interfere with candidate selection. Do not use it when
+the browser and Open3D server run on different machines; remote connections
+generally require the default STUN/TURN servers or a custom
+``WEBRTC_STUN_SERVER`` value.

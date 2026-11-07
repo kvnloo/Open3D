@@ -2,6 +2,20 @@ open3d_ispc_add_library(visualization OBJECT)
 
 open3d_ispc_add_library(visualization_impl OBJECT)
 set_target_properties(visualization_impl PROPERTIES CXX_VISIBILITY_PRESET hidden)
+# filament uses C++20 designated initializers
+set_property(TARGET visualization_impl visualization PROPERTY CXX_STANDARD 20)
+
+# Open3D source builds and selected prebuilt archives include the Vulkan
+# external-image-import patch required by Gaussian splatting.
+if(BUILD_FILAMENT_FROM_SOURCE OR FILAMENT_VULKAN_EXTERNAL_IMAGE_IMPORT)
+    set(OPEN3D_FILAMENT_VULKAN_EXTERNAL_IMAGE_IMPORT 1)
+else()
+    set(OPEN3D_FILAMENT_VULKAN_EXTERNAL_IMAGE_IMPORT 0)
+endif()
+target_compile_definitions(visualization_impl PRIVATE
+    OPEN3D_FILAMENT_VULKAN_EXTERNAL_IMAGE_IMPORT=${OPEN3D_FILAMENT_VULKAN_EXTERNAL_IMAGE_IMPORT})
+target_compile_definitions(visualization PRIVATE
+    OPEN3D_FILAMENT_VULKAN_EXTERNAL_IMAGE_IMPORT=${OPEN3D_FILAMENT_VULKAN_EXTERNAL_IMAGE_IMPORT})
 
 target_sources(visualization_impl PRIVATE
     shader/GeometryRenderer.cpp
@@ -27,6 +41,12 @@ target_sources(visualization PRIVATE
     utility/SelectionPolygon.cpp
     utility/SelectionPolygonVolume.cpp
 )
+
+if (UNIX AND NOT APPLE)
+    target_sources(visualization PRIVATE
+        visualizer/EGLOffscreenContext.cpp
+    )
+endif()
 
 target_sources(visualization PRIVATE
     visualizer/RenderOption.cpp
@@ -71,6 +91,9 @@ if (BUILD_GUI)
 
     target_sources(visualization_impl PRIVATE
         rendering/filament/FilamentCamera.cpp
+        rendering/gaussian_splat/GaussianSplatRenderer.cpp
+        rendering/gaussian_splat/GaussianSplatDataPacking.cpp
+        rendering/gaussian_splat/GaussianSplatPassRunner.cpp
         rendering/filament/FilamentEntitiesMods.cpp
         rendering/filament/FilamentGeometryBuffersBuilder.cpp
         rendering/filament/FilamentRenderToBuffer.cpp
@@ -80,8 +103,33 @@ if (BUILD_GUI)
         rendering/filament/LineSetBuffers.cpp
         rendering/filament/PointCloudBuffers.cpp
         rendering/filament/TriangleMeshBuffers.cpp
-        rendering/filament/GaussianSplatBuffers.cpp
     )
+
+    if (APPLE)
+        target_sources(visualization_impl PRIVATE
+            rendering/gaussian_splat/ComputeGPUMetal.mm
+            rendering/gaussian_splat/GaussianSplatMetalBackend.mm
+            rendering/filament/FilamentNativeInterop.mm
+            rendering/filament/FilamentResourceManagerApple.mm
+        )
+        set(O3D_GS_METAL_ARC_SOURCES
+            rendering/gaussian_splat/ComputeGPUMetal.mm
+            rendering/gaussian_splat/GaussianSplatMetalBackend.mm
+            rendering/filament/FilamentResourceManagerApple.mm
+        )
+        set_source_files_properties(${O3D_GS_METAL_ARC_SOURCES}
+            PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    else()
+        target_sources(visualization_impl PRIVATE
+            rendering/gaussian_splat/ComputeGPUVulkan.cpp
+            rendering/gaussian_splat/GaussianSplatVulkanContext.cpp
+            rendering/gaussian_splat/GaussianSplatVulkanBackend.cpp
+        )
+        # visualization_impl is an OBJECT library; add_dependencies ensures
+        # correct build order with ext_vkmemalloc/ext_vmahpp across all
+        # generators.
+        add_dependencies(visualization_impl ext_vkmemalloc ext_vmahpp)
+    endif()
 
     target_sources(visualization PRIVATE
         utility/Draw.cpp

@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -165,10 +165,10 @@ struct formatter<
     template <typename FormatContext>
     auto format(const open3d::visualization::rendering::REHandle_abstract& uid,
                 FormatContext& ctx) const -> decltype(ctx.out()) {
-        return format_to(ctx.out(), "[{}, {}, hash: {}]",
-                         open3d::visualization::rendering::REHandle_abstract::
-                                 TypeToString(uid.type),
-                         uid.GetId(), uid.Hash());
+        return fmt::format_to(ctx.out(), "[{}, {}, hash: {}]",
+                              open3d::visualization::rendering::
+                                      REHandle_abstract::TypeToString(uid.type),
+                              uid.GetId(), uid.Hash());
     }
 
     template <typename ParseContext>

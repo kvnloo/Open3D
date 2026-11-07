@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -90,6 +90,11 @@ std::runtime_error ZMQReceiver::GetLastError() {
     std::runtime_error result = mainloop_exception_;
     mainloop_exception_ = std::runtime_error("");
     return result;
+}
+
+std::string ZMQReceiver::GetLastEndpoint() const {
+    if (!socket_) return "";
+    return socket_->get(zmq::sockopt::last_endpoint);
 }
 
 void ZMQReceiver::Mainloop() {
@@ -185,6 +190,11 @@ void ZMQReceiver::Mainloop() {
                     status.str += std::string(" with ") + err.what();
                     replies.push_back(CreateStatusMessage(status));
                     break;
+                } catch (...) {
+                    LogInfo("ZMQReceiver::Mainloop: failed to unpack message");
+                    replies.push_back(CreateStatusMessage(
+                            messages::Status::ErrorUnpackingFailed()));
+                    break;
                 }
             }
             if (replies.size() == 1) {
@@ -203,6 +213,8 @@ void ZMQReceiver::Mainloop() {
                 socket_->send(reply, zmq::send_flags::none);
             }
         } catch (const zmq::error_t& err) {
+            LogInfo("ZMQReceiver::Mainloop: {}", err.what());
+        } catch (const std::exception& err) {
             LogInfo("ZMQReceiver::Mainloop: {}", err.what());
         }
     }
