@@ -18,140 +18,83 @@
 # SOFTWARE.
 
 
-import os
-import open3d as o3d
 import numpy as np
-import matplotlib.pyplot as plt
-
-if os.environ.get("GITHUB_ACTIONS") == "true":
-    print("CI detected: Disabling CUDA to avoid GPU-related test failures.")
-    os.environ["OPEN3D_CPU_ONLY"] = "1"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
-# Initialize device safely
-try:
-    dev = o3d.core.Device("CUDA:0")
-    if dev.get_type() == o3d.core.Device.DeviceType.CUDA:
-        print("CUDA detected. Forcing Open3D to use CPU to avoid CI crashes.")
-        dev = o3d.core.Device("CPU:0")
-except Exception:
-    dev = o3d.core.Device("CPU:0")
-
-o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
+import open3d as o3d
 
 
-def safe_boundary_half_edges(mesh, vid):
-    try:
-        return mesh.BoundaryHalfEdgesFromVertex(vid)
-    except Exception as e:
-        if "not on boundary" in str(e):
-            return []
-        return []
-
-
-def safe_send_data(data):
-    """Prevents RemoteFunctions.SendGarbage from failing."""
-    if not isinstance(data, (bytes, bytearray)):
-        return False
-    return True
-
-
-def safe_unpack_message(data):
-    """Prevents RemoteFunctions.SendReceiveUnpackMessages from failing."""
-    try:
-        if not isinstance(data, (bytes, bytearray)) or len(data) < 4:
-            return None, None
-        import struct
-        msg_id = struct.unpack("!I", data[:4])[0]
-        payload = data[4:]
-        return msg_id, payload
-    except Exception:
-        return None, None
-
-
-# Create synthetic point cloud
-xyz = np.random.rand(10000, 3) * 10  # Points in [0,10]
-rgb_colors = np.random.rand(10000, 3)
-pcd = o3d.geometry.PointCloud()
-pcd.points = o3d.utility.Vector3dVector(xyz)
-pcd.colors = o3d.utility.Vector3dVector(rgb_colors)
-
-# Normalize z-coordinates for height-based color mapping
-z = xyz[:, 2]
-z_normalized = (z - np.min(z)) / (np.max(z) - np.min(z))
-
-# Scale point cloud to unit cube
-pcd.scale(1 / np.max(pcd.get_max_bound() - pcd.get_min_bound()),
-          center=pcd.get_center())
-
-# Create octree
-print('Octree division')
-octree = o3d.geometry.Octree(max_depth=5)
-octree.convert_from_point_cloud(pcd, size_expand=0.01)
-
-# Available color maps
-color_maps = ['jet', 'hot', 'viridis', 'cool']
-current_cmap_index = [0]
-color_mode = ['height']
-
-
-# Apply color to point cloud + octree
 def apply_color(pcd,
                 octree,
                 mode,
                 cmap_name=None,
                 z_normalized=None,
                 rgb_colors=None):
+    """Color points and their octree leaves with the same source colors."""
     if mode == 'height':
+        import matplotlib.pyplot as plt
+
         cmap = plt.get_cmap(cmap_name)
         colors = cmap(z_normalized)[:, :3]
-        pcd.colors = o3d.utility.Vector3dVector(colors)
     else:
-        pcd.colors = o3d.utility.Vector3dVector(rgb_colors)
+        colors = rgb_colors
 
-    def color_octree_leaves(octree, pcd):
-        def traverse_and_color(node, node_info):
-            if isinstance(node, o3d.geometry.OctreePointColorLeafNode):
-                min_bound = node_info.origin
-                size = node_info.size
-                max_bound = min_bound + np.array([size, size, size])
-                points = np.asarray(pcd.points)
-                colors = np.asarray(pcd.colors)
-                mask = np.all((points >= min_bound) & (points <= max_bound),
-                              axis=1)
-                if np.sum(mask) > 0:
-                    avg_color = np.mean(colors[mask], axis=0)
-                    node.color = avg_color
-                else:
-                    node.color = np.array([0.5, 0.5, 0.5])
-        octree.traverse(traverse_and_color)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+    point_colors = np.asarray(pcd.colors)
 
-    color_octree_leaves(octree, pcd)
+    def traverse_and_color(node, node_info):
+        if isinstance(node, o3d.geometry.OctreePointColorLeafNode):
+            # Leaf indices reflect half-open octree insertion boundaries.
+            # A full-cloud bounds mask would include neighboring leaf points.
+            indices = node.indices
+            if indices:
+                node.color = np.mean(
+                    point_colors[np.asarray(indices, dtype=np.intp)], axis=0)
+            else:
+                node.color = np.array([0.5, 0.5, 0.5])
+        return False
+
+    octree.traverse(traverse_and_color)
     return pcd, octree
 
 
-pcd, octree = apply_color(pcd,
-                          octree,
-                          'height',
-                          cmap_name=color_maps[current_cmap_index[0]],
-                          z_normalized=z_normalized,
-                          rgb_colors=rgb_colors)
+def main():
+    """Create a sample octree and allow interactive height/RGB coloring."""
+    xyz = np.random.rand(10000, 3) * 10
+    rgb_colors = np.random.rand(10000, 3)
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(xyz)
+    pcd.colors = o3d.utility.Vector3dVector(rgb_colors)
 
-# Custom visualization
+    z = xyz[:, 2]
+    z_normalized = (z - np.min(z)) / (np.max(z) - np.min(z))
+    pcd.scale(1 / np.max(pcd.get_max_bound() - pcd.get_min_bound()),
+              center=pcd.get_center())
 
+    print('Octree division')
+    octree = o3d.geometry.Octree(max_depth=5)
+    octree.convert_from_point_cloud(pcd, size_expand=0.01)
 
-def custom_visualize(pcd, octree):
+    color_maps = ['jet', 'hot', 'viridis', 'cool']
+    current_cmap_index = 0
+    color_mode = 'height'
+    pcd, octree = apply_color(pcd,
+                              octree,
+                              'height',
+                              cmap_name=color_maps[current_cmap_index],
+                              z_normalized=z_normalized,
+                              rgb_colors=rgb_colors)
+
     vis = o3d.visualization.VisualizerWithKeyCallback()
-    vis.create_window(window_name='Octree and Point Cloud Visualization')
+    if not vis.create_window(
+            window_name='Octree and Point Cloud Visualization'):
+        raise RuntimeError('Could not create Open3D visualization window')
     vis.add_geometry(pcd)
     vis.add_geometry(octree)
 
     def toggle_color_map(vis):
-        nonlocal pcd, octree
-        if color_mode[0] == 'height':
-            current_cmap_index[0] = (
-                current_cmap_index[0] + 1) % len(color_maps)
-            new_cmap = color_maps[current_cmap_index[0]]
+        nonlocal current_cmap_index, pcd, octree
+        if color_mode == 'height':
+            current_cmap_index = (current_cmap_index + 1) % len(color_maps)
+            new_cmap = color_maps[current_cmap_index]
             print(f"Switching to color map: {new_cmap} (height mode)")
             pcd, octree = apply_color(pcd,
                                       octree,
@@ -167,22 +110,24 @@ def custom_visualize(pcd, octree):
         return False
 
     def toggle_color_mode(vis):
-        nonlocal pcd, octree
-        color_mode[0] = 'rgb' if color_mode[0] == 'height' else 'height'
-        if color_mode[0] == 'height':
-            print(
-                f"Switching to height mode with color map: {color_maps[current_cmap_index[0]]}")
+        nonlocal color_mode, pcd, octree
+        color_mode = 'rgb' if color_mode == 'height' else 'height'
+        if color_mode == 'height':
+            print("Switching to height mode with color map: "
+                  f"{color_maps[current_cmap_index]}")
             pcd, octree = apply_color(
                 pcd,
                 octree,
                 'height',
-                cmap_name=color_maps[current_cmap_index[0]],
+                cmap_name=color_maps[current_cmap_index],
                 z_normalized=z_normalized,
                 rgb_colors=rgb_colors)
         else:
             print("Switching to RGB mode")
-            pcd, octree = apply_color(
-                pcd, octree, 'rgb', rgb_colors=rgb_colors)
+            pcd, octree = apply_color(pcd,
+                                      octree,
+                                      'rgb',
+                                      rgb_colors=rgb_colors)
         vis.update_geometry(pcd)
         vis.update_geometry(octree)
         vis.update_renderer()
@@ -191,14 +136,14 @@ def custom_visualize(pcd, octree):
     vis.register_key_callback(ord('4'), toggle_color_map)
     vis.register_key_callback(ord('5'), toggle_color_mode)
     print("Visualizing with initial color map: jet (height mode)")
-    print("Press '4' to cycle color maps (jet, hot, viridis, cool) in height mode")
+    print("Press '4' to cycle color maps "
+          "(jet, hot, viridis, cool) in height mode")
     print("Press '5' to toggle between height-based and RGB-based coloring")
-    vis.run()
-    vis.destroy_window()
+    try:
+        vis.run()
+    finally:
+        vis.destroy_window()
 
 
-# Run visualization
-try:
-    custom_visualize(pcd, octree)
-except Exception as e:
-    print(f"Visualization skipped due to error: {e}")
+if __name__ == '__main__':
+    main()
