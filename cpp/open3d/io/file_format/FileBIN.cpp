@@ -6,6 +6,8 @@
 // ----------------------------------------------------------------------------
 
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <memory>
 
 #include "open3d/io/FeatureIO.h"
@@ -96,6 +98,11 @@ bool ReadOctreeBinaryStreamFromBIN(const std::string &filename,
     // Read file contents into bin_data
     bin_data.assign((std::istreambuf_iterator<char>(file)),
                     std::istreambuf_iterator<char>());
+    if (file.bad()) {
+        utility::LogWarning("Read BIN failed: error reading file: {}",
+                            filename);
+        return false;
+    }
 
     file.close();
     return true;

@@ -11,6 +11,9 @@
 
 #include <Eigen/Dense>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <limits>
 #include <unordered_map>
 
 #include "open3d/geometry/BoundingVolume.h"
@@ -51,29 +54,32 @@ std::shared_ptr<OctreeNode> OctreeNode::ConstructFromJsonValue(
 
 std::shared_ptr<OctreeNode> OctreeNode::ConstructFromBinaryStream(
         const std::string& in, size_t& offset) {
-    if (in.size() < offset + 18) return nullptr;
+    if (offset > in.size()) return nullptr;
 
-    std::shared_ptr<OctreeNode> node = nullptr;
-    if (std::string(&in[offset], 18) == "OctreeInternalNode") {
+    // Require a complete NUL-terminated class identifier before parsing.
+    const auto has_class_id = [&in, offset](const char* id, size_t length) {
+        return in.size() - offset >= length &&
+               in.compare(offset, length, id, length) == 0;
+    };
+
+    std::shared_ptr<OctreeNode> node;
+    if (has_class_id("OctreeInternalNode", sizeof("OctreeInternalNode"))) {
         node = std::make_shared<OctreeInternalNode>();
-    } else if (std::string(&in[offset], 23) == "OctreeInternalPointNode") {
+    } else if (has_class_id("OctreeInternalPointNode",
+                            sizeof("OctreeInternalPointNode"))) {
         node = std::make_shared<OctreeInternalPointNode>();
-    } else if (std::string(&in[offset], 19) == "OctreeColorLeafNode") {
+    } else if (has_class_id("OctreeColorLeafNode",
+                            sizeof("OctreeColorLeafNode"))) {
         node = std::make_shared<OctreeColorLeafNode>();
-    } else if (std::string(&in[offset], 24) == "OctreePointColorLeafNode") {
+    } else if (has_class_id("OctreePointColorLeafNode",
+                            sizeof("OctreePointColorLeafNode"))) {
         node = std::make_shared<OctreePointColorLeafNode>();
     } else {
-        utility::LogError("Unhandled class id {}",
-                          std::string(&in[offset], 24));
+        return nullptr;
     }
 
-    // Convert from binary
-    if (node != nullptr) {
-        bool deserialization_success =
-                node->DeserializeFromBinaryStream(in, offset);
-        if (!deserialization_success) {
-            node = nullptr;
-        }
+    if (!node->DeserializeFromBinaryStream(in, offset)) {
+        return nullptr;
     }
     return node;
 }
@@ -175,8 +181,9 @@ bool OctreeInternalNode::DeserializeFromBinaryStream(const std::string& in,
     // Read children
     for (int cid = 0; cid < 8; ++cid) {
         if (in.size() < offset + sizeof(uint8_t)) return false;
-        uint8_t has_child = *reinterpret_cast<const uint8_t*>(&in[offset]);
+        const uint8_t has_child = static_cast<uint8_t>(in[offset]);
         offset += sizeof(uint8_t);
+        if (has_child > 1) return false;
         if (has_child) {
             children_[cid] = OctreeNode::ConstructFromBinaryStream(in, offset);
             if (!children_[cid]) {
@@ -293,8 +300,9 @@ bool OctreeInternalPointNode::DeserializeFromBinaryStream(const std::string& in,
     // Read children
     for (int cid = 0; cid < 8; ++cid) {
         if (in.size() < offset + sizeof(uint8_t)) return false;
-        uint8_t has_child = *reinterpret_cast<const uint8_t*>(&in[offset]);
+        const uint8_t has_child = static_cast<uint8_t>(in[offset]);
         offset += sizeof(uint8_t);
+        if (has_child > 1) return false;
         if (has_child) {
             children_[cid] = OctreeNode::ConstructFromBinaryStream(in, offset);
             if (!children_[cid]) {
@@ -307,15 +315,18 @@ bool OctreeInternalPointNode::DeserializeFromBinaryStream(const std::string& in,
 
     // Read indices size
     if (in.size() < offset + sizeof(uint64_t)) return false;
-    uint64_t indices_size = *reinterpret_cast<const uint64_t*>(&in[offset]);
-    offset += sizeof(uint64_t);
-    // Read indices
+    uint64_t indices_size = 0;
+    std::memcpy(&indices_size, in.data() + offset, sizeof(indices_size));
+    offset += sizeof(indices_size);
+    // Bound the count by the remaining input before allocating or iterating.
+    if (indices_size > (in.size() - offset) / sizeof(uint64_t)) return false;
     indices_.clear();
     for (uint64_t i = 0; i < indices_size; ++i) {
-        if (in.size() < offset + sizeof(uint64_t)) return false;
-        uint64_t idx = *reinterpret_cast<const uint64_t*>(&in[offset]);
-        offset += sizeof(uint64_t);
-        indices_.push_back(idx);
+        uint64_t idx = 0;
+        std::memcpy(&idx, in.data() + offset, sizeof(idx));
+        offset += sizeof(idx);
+        if (idx > std::numeric_limits<size_t>::max()) return false;
+        indices_.push_back(static_cast<size_t>(idx));
     }
 
     return true;
@@ -508,15 +519,18 @@ bool OctreePointColorLeafNode::DeserializeFromBinaryStream(
 
     // Read indices size
     if (in.size() < offset + sizeof(uint64_t)) return false;
-    uint64_t indices_size = *reinterpret_cast<const uint64_t*>(&in[offset]);
-    offset += sizeof(uint64_t);
-    // Read indices
+    uint64_t indices_size = 0;
+    std::memcpy(&indices_size, in.data() + offset, sizeof(indices_size));
+    offset += sizeof(indices_size);
+    // Bound the count by the remaining input before allocating or iterating.
+    if (indices_size > (in.size() - offset) / sizeof(uint64_t)) return false;
     indices_.clear();
     for (uint64_t i = 0; i < indices_size; ++i) {
-        if (in.size() < offset + sizeof(uint64_t)) return false;
-        uint64_t idx = *reinterpret_cast<const uint64_t*>(&in[offset]);
-        offset += sizeof(uint64_t);
-        indices_.push_back(idx);
+        uint64_t idx = 0;
+        std::memcpy(&idx, in.data() + offset, sizeof(idx));
+        offset += sizeof(idx);
+        if (idx > std::numeric_limits<size_t>::max()) return false;
+        indices_.push_back(static_cast<size_t>(idx));
     }
 
     return true;
@@ -987,37 +1001,45 @@ bool Octree::ConvertFromJsonValue(const Json::Value& value) {
 }
 
 bool Octree::SerializeToBinaryStream(std::string& out) const {
-    bool rc = true;
-    // Serialize the basic attributes
+    // Keep the existing 40-byte metadata layout; portability is a separate
+    // msgpack design decision before upstream adoption.
     out.clear();
     out.append(reinterpret_cast<const char*>(origin_.data()),
                sizeof(double) * 3);
     out.append(reinterpret_cast<const char*>(&size_), sizeof(double));
-    out.append(reinterpret_cast<const char*>(&max_depth_), sizeof(uint64_t));
-    // Serialize the root node
-    if (root_node_) {
-        rc = rc && root_node_->SerializeToBinaryStream(out);
-    }
-    return rc;
+    const uint64_t depth = static_cast<uint64_t>(max_depth_);
+    out.append(reinterpret_cast<const char*>(&depth), sizeof(depth));
+    return !root_node_ || root_node_->SerializeToBinaryStream(out);
 }
 
 bool Octree::DeserializeFromBinaryStream(const std::string& in) {
-    size_t offset = 0;
-    // Deserialize the basic attributes
-    if (in.size() < offset + sizeof(double) * 3) return false;
-    std::memcpy(origin_.data(), &in[offset], sizeof(double) * 3);
-    offset += sizeof(double) * 3;
+    constexpr size_t kOriginBytes = sizeof(double) * 3;
+    constexpr size_t kHeaderBytes =
+            kOriginBytes + sizeof(double) + sizeof(uint64_t);
+    if (in.size() < kHeaderBytes) return false;
 
-    if (in.size() < offset + sizeof(size_)) return false;
-    std::memcpy(&size_, &in[offset], sizeof(size_));
-    offset += sizeof(double);
+    // Parse into local values so invalid data cannot mutate an existing tree.
+    Eigen::Vector3d origin;
+    double size;
+    uint64_t depth;
+    std::memcpy(origin.data(), in.data(), kOriginBytes);
+    std::memcpy(&size, in.data() + kOriginBytes, sizeof(size));
+    std::memcpy(&depth, in.data() + kOriginBytes + sizeof(size), sizeof(depth));
+    if (depth > std::numeric_limits<size_t>::max()) return false;
 
-    if (in.size() < offset + sizeof(uint64_t)) return false;
-    std::memcpy(&max_depth_, &in[offset], sizeof(uint64_t));
-    offset += sizeof(uint64_t);
+    size_t offset = kHeaderBytes;
+    std::shared_ptr<OctreeNode> root;
+    // Exactly the header means an empty tree; any additional data must be
+    // one complete root node without trailing bytes.
+    if (offset < in.size()) {
+        root = OctreeNode::ConstructFromBinaryStream(in, offset);
+        if (!root || offset != in.size()) return false;
+    }
 
-    // Deserialize the root node
-    root_node_ = OctreeNode::ConstructFromBinaryStream(in, offset);
+    origin_ = origin;
+    size_ = size;
+    max_depth_ = static_cast<size_t>(depth);
+    root_node_ = root;
     return true;
 }
 

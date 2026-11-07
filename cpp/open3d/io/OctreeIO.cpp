@@ -98,16 +98,18 @@ bool ReadOctreeFromBIN(const std::string &filename, geometry::Octree &octree) {
     if (!ReadOctreeBinaryStreamFromBIN(filename, bin_data)) {
         return false;
     }
-    // Deserialize bin_data into octree
-    octree.DeserializeFromBinaryStream(bin_data);
-    return true;
+    // Preserve parse failure status for both C++ and Python callers.
+    return octree.DeserializeFromBinaryStream(bin_data);
 }
 
 bool WriteOctreeToBIN(const std::string &filename,
                       const geometry::Octree &octree) {
     std::string bin_data;
-    octree.SerializeToBinaryStream(bin_data);
+    if (!octree.SerializeToBinaryStream(bin_data)) {
+        return false;
+    }
     return WriteOctreeBinaryStreamToBIN(filename, bin_data);
 }
+
 }  // namespace io
 }  // namespace open3d

@@ -10,6 +10,7 @@
 #include <json/json.h>
 
 #include <cstdio>
+#include <fstream>
 
 #include "open3d/data/Dataset.h"
 #include "open3d/geometry/Octree.h"
@@ -89,6 +90,33 @@ TEST(OctreeIO, FileIOSevenCubes) {
 
     WriteReadAndAssertEqual(octree, "/temp_octree.json");
     WriteReadAndAssertEqual(octree, "/temp_octree.bin");
+}
+
+TEST(OctreeIO, RejectMalformedBinaryWithoutMutation) {
+    geometry::Octree empty(2, Eigen::Vector3d(0, 0, 0), 2.0);
+    std::string header;
+    ASSERT_TRUE(empty.SerializeToBinaryStream(header));
+    ASSERT_EQ(header.size(), 40u);
+
+    const std::string filename =
+            utility::filesystem::GetTempDirectoryPath() +
+            "/octree_invalid_root.bin";
+    {
+        std::ofstream file(filename, std::ios::binary);
+        ASSERT_TRUE(file.is_open());
+        file.write(header.data(), static_cast<std::streamsize>(header.size()));
+        file.put('\xff');
+        file.close();
+        ASSERT_TRUE(file.good());
+    }
+
+    geometry::Octree destination(7, Eigen::Vector3d(3, 4, 5), 6.0);
+    EXPECT_FALSE(io::ReadOctree(filename, destination));
+    EXPECT_EQ(destination.max_depth_, 7u);
+    EXPECT_DOUBLE_EQ(destination.size_, 6.0);
+    ExpectEQ(destination.origin_, Eigen::Vector3d(3, 4, 5));
+    EXPECT_EQ(destination.root_node_, nullptr);
+    std::remove(filename.c_str());
 }
 
 }  // namespace tests

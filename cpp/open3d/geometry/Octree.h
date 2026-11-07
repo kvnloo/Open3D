@@ -130,8 +130,8 @@ public:
 
     bool ConvertToJsonValue(Json::Value& value) const override;
     bool ConvertFromJsonValue(const Json::Value& value) override;
-    bool SerializeToBinaryStream(std::string& out) const;
-    bool DeserializeFromBinaryStream(const std::string& in, size_t& offset);
+    bool SerializeToBinaryStream(std::string& out) const override;
+    bool DeserializeFromBinaryStream(const std::string& in, size_t& offset) override;
 
 public:
     /// Use vector instead of C-array for Pybind11, otherwise, need to define
@@ -167,8 +167,8 @@ public:
 
     bool ConvertToJsonValue(Json::Value& value) const override;
     bool ConvertFromJsonValue(const Json::Value& value) override;
-    bool SerializeToBinaryStream(std::string& out) const;
-    bool DeserializeFromBinaryStream(const std::string& in, size_t& offset);
+    bool SerializeToBinaryStream(std::string& out) const override;
+    bool DeserializeFromBinaryStream(const std::string& in, size_t& offset) override;
 
 public:
     /// Indices of points associated with any children of this node
@@ -212,8 +212,8 @@ public:
 
     bool ConvertToJsonValue(Json::Value& value) const override;
     bool ConvertFromJsonValue(const Json::Value& value) override;
-    bool SerializeToBinaryStream(std::string& out) const;
-    bool DeserializeFromBinaryStream(const std::string& in, size_t& offset);
+    bool SerializeToBinaryStream(std::string& out) const override;
+    bool DeserializeFromBinaryStream(const std::string& in, size_t& offset) override;
     /// TODO: flexible data, with lambda function for handling node
     /// Color of the node.
     Eigen::Vector3d color_ = Eigen::Vector3d(0, 0, 0);
@@ -248,8 +248,8 @@ public:
 
     bool ConvertToJsonValue(Json::Value& value) const override;
     bool ConvertFromJsonValue(const Json::Value& value) override;
-    bool SerializeToBinaryStream(std::string& out) const;
-    bool DeserializeFromBinaryStream(const std::string& in, size_t& offset);
+    bool SerializeToBinaryStream(std::string& out) const override;
+    bool DeserializeFromBinaryStream(const std::string& in, size_t& offset) override;
 
     /// Associated point indices with this node.
     std::vector<size_t> indices_;
