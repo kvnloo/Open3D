@@ -234,8 +234,16 @@ def get_xyz_from_pts(pts_row, depth, px, py, focal):
         d1 = depth[v0, u0 + 1]
         d2 = depth[v0 + 1, u0]
         d3 = depth[v0 + 1, u0 + 1]
-        d = (1 - vp) * (d1 * up + d0 * (1 - up)) + vp * (d3 * up + d2 *
-                                                         (1 - up))
+        # Do not blend missing depths into a valid-looking 3D point.
+        # Ignore zero-weight corners so they cannot poison the sum with NaN.
+        samples = ((d0, (1 - vp) * (1 - up)),
+                   (d1, (1 - vp) * up),
+                   (d2, vp * (1 - up)),
+                   (d3, vp * up))
+        if any(weight > 0 and (not np.isfinite(value) or value <= 0)
+               for value, weight in samples):
+            return [0, 0, 0]
+        d = sum(weight * value for value, weight in samples if weight > 0)
         return get_xyz_from_uv(u, v, d, px, py, focal)
     else:
         return [0, 0, 0]
