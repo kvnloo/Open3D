@@ -385,6 +385,13 @@ std::shared_ptr<PointCloud> PointCloud::VoxelDownSample(
     if (voxel_size <= 0.0) {
         utility::LogError("voxel_size <= 0.");
     }
+    // Reject unknown enum values before entering the nearest-point path:
+    // otherwise no winner is tracked and the index sentinel is dereferenced.
+    if (reduction != VoxelReduction::Centroid &&
+        reduction != VoxelReduction::NearestToCentroid &&
+        reduction != VoxelReduction::NearestToCenter) {
+        utility::LogError("Unsupported VoxelReduction value.");
+    }
     Eigen::Vector3d voxel_size3 =
             Eigen::Vector3d(voxel_size, voxel_size, voxel_size);
     Eigen::Vector3d voxel_min_bound = GetMinBound() - voxel_size3 * 0.5;

@@ -876,6 +876,19 @@ TEST(PointCloud, VoxelDownSample_InvalidVoxelSize_AllModes) {
     }
 }
 
+// Invalid reduction values must fail before an uninitialized winner index
+// can be used to address the original point and attribute arrays.
+TEST(PointCloud, VoxelDownSample_InvalidReduction) {
+    geometry::PointCloud pcd;
+    pcd.points_ = {{0.5, 0.5, 0.5}};
+    using VoxelReduction = geometry::PointCloud::VoxelReduction;
+
+    EXPECT_ANY_THROW(
+            pcd.VoxelDownSample(1.0, static_cast<VoxelReduction>(-1)));
+    EXPECT_ANY_THROW(
+            pcd.VoxelDownSample(1.0, static_cast<VoxelReduction>(3)));
+}
+
 TEST(PointCloud, UniformDownSample) {
     std::vector<Eigen::Vector3d> points({
             {0, 0, 0},
