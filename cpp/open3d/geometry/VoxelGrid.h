@@ -189,10 +189,12 @@ public:
                                                   double height,
                                                   double depth);
 
-    /// Creates a voxel grid given sparse 3d indices.
+    /// Creates a voxel grid given sparse 3D indices.
+    /// Duplicate indices produce one voxel with the average input color,
+    /// consistent with point-cloud voxelization's default AVG pooling.
     ///
-    /// \param indices 3d indices of each VoxelGrid.
-    /// \param colors Voxel colors for each voxel of the VoxelGrid.
+    /// \param indices Grid index for each input color.
+    /// \param colors Input voxel colors, one per index.
     /// \param origin Coordinate center of the VoxelGrid.
     /// \param voxel_size Voxel edge length; must be greater than zero.
     static std::shared_ptr<VoxelGrid> CreateFromSparseIndices(

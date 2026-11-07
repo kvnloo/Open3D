@@ -55,8 +55,17 @@ std::shared_ptr<VoxelGrid> VoxelGrid::CreateFromSparseIndices(
     auto output = std::make_shared<VoxelGrid>();
     output->origin_ = origin;
     output->voxel_size_ = voxel_size;
+    // Pool repeated indices just like point-cloud voxelization with AVG.
+    // Reuse the existing accumulator rather than losing earlier colors.
+    std::unordered_map<Eigen::Vector3i, AggColorVoxel,
+                       utility::hash_eigen<Eigen::Vector3i>>
+            voxelindex_to_accpoint;
     for (size_t i = 0; i < indices.size(); ++i) {
-        output->AddVoxel(geometry::Voxel(indices[i], colors[i]));
+        voxelindex_to_accpoint[indices[i]].Add(indices[i], colors[i]);
+    }
+    for (const auto &accpoint : voxelindex_to_accpoint) {
+        output->AddVoxel(geometry::Voxel(
+                accpoint.first, accpoint.second.GetAverageColor()));
     }
     return output;
 }

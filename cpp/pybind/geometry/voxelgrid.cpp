@@ -138,7 +138,9 @@ void pybind_voxelgrid_definitions(py::module &m) {
             .def_static("create_from_sparse_indices",
                         &VoxelGrid::CreateFromSparseIndices,
                         "Creates a voxel grid from sparse 3D indices. "
-                        "voxel_size must be positive.",
+                        "Repeated indices average their input colors, as "
+                        "in default point-cloud voxel pooling. voxel_size "
+                        "must be positive.",
                         "indices"_a, "colors"_a, "origin"_a, "voxel_size"_a)
             .def_static(
                     "create_from_point_cloud", &VoxelGrid::CreateFromPointCloud,
@@ -235,8 +237,9 @@ void pybind_voxelgrid_definitions(py::module &m) {
              {"depth", "Spatial depth extend of the VoxelGrid."}});
     docstring::ClassMethodDocInject(
             m, "VoxelGrid", "create_from_sparse_indices",
-            {{"indices", "3d indices of each VoxelGrid."},
-             {"colors", "Voxel colors for each voxel of the VoxelGrid."},
+            {{"indices", "Grid index for each input color. Repeated indices "
+                          "are averaged."},
+             {"colors", "Input voxel colors, one per index."},
              {"origin", "Coordinate center of the VoxelGrid."},
              {"voxel_size", "Positive voxel edge length."}});
     docstring::ClassMethodDocInject(
