@@ -126,11 +126,23 @@ def load_rgbd_file_names(config):
             return depth_file_names, sorted(matches)
         color_file_names.extend(matches)
     if len(color_file_names) == len(depth_file_names):
-        return depth_file_names, sorted(color_file_names)
+        # Mixed extensions must have one color for each depth frame.
+        # A matching count can conceal duplicate or missing frame stems.
+        color_by_stem = {
+            splitext(basename(path))[0]: path for path in color_file_names
+        }
+        if len(color_by_stem) == len(color_file_names):
+            depth_stems = [
+                splitext(basename(path))[0] for path in depth_file_names
+            ]
+            if set(color_by_stem) == set(depth_stems):
+                return depth_file_names, [
+                    color_by_stem[stem] for stem in depth_stems
+                ]
 
     depth_folder = os.path.join(config.path_dataset, config.depth_folder)
-    print('Found {} depth images in {}, but cannot find matched number of '
-          'color images in {} with extensions {}, abort!'.format(
+    print('Found {} depth images in {}, but cannot find matching '
+          'color frames in {} with extensions {}, abort!'.format(
               len(depth_file_names), depth_folder, color_folder, extensions))
     return [], []
 

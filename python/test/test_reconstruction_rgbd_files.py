@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import runpy
 
+import pytest
+
 
 def test_mixed_rgbd_color_extensions(tmp_path):
     for folder in ('color', 'depth'):
@@ -34,3 +36,27 @@ def test_mixed_rgbd_color_extensions(tmp_path):
     (tmp_path / 'color' / '00002.png').touch()
     _, preferred_colors = tensor['load_rgbd_file_names'](config)
     assert [Path(p).suffix for p in preferred_colors] == ['.png'] * 3
+
+@pytest.mark.parametrize('color_names,depth_names', [
+    (('00001.jpg', '00001.png'), ('00001.png', '00002.png')),
+    (('00001.jpg', '00003.png'), ('00001.png', '00002.png')),
+    (('00001.jpg', '00002.jpg', '00002.png'),
+     ('00001.png', '00002.png', '00003.png')),
+])
+def test_mixed_rgbd_fallback_rejects_count_only_matches(tmp_path, color_names,
+                                                        depth_names):
+    # Duplicate or unrelated color stems must not replace a missing frame.
+    for folder, names in (('color', color_names), ('depth', depth_names)):
+        directory = tmp_path / folder
+        directory.mkdir()
+        for name in names:
+            (directory / name).touch()
+
+    examples = Path(__file__).resolve().parents[2] / 'examples' / 'python'
+    tensor = runpy.run_path(str(examples / 't_reconstruction_system/common.py'))
+    config = SimpleNamespace(path_dataset=str(tmp_path),
+                             depth_folder='depth',
+                             color_folder='color')
+    depth_files, color_files = tensor['load_rgbd_file_names'](config)
+    assert depth_files == []
+    assert color_files == []
