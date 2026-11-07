@@ -49,6 +49,9 @@ std::shared_ptr<VoxelGrid> VoxelGrid::CreateFromSparseIndices(
     if (indices.size() != colors.size()) {
         utility::LogError("Size of indices and colors are different");
     }
+    if (voxel_size <= 0.0) {
+        utility::LogError("voxel_size <= 0.");
+    }
     auto output = std::make_shared<VoxelGrid>();
     output->origin_ = origin;
     output->voxel_size_ = voxel_size;
