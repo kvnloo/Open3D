@@ -159,7 +159,14 @@ function(open3d_build_3rdparty_library name)
 endfunction()
 
 # CMake arguments for configuring ExternalProjects. Use the second _hidden
-# version by default.
+# version by default. Single-config Windows Ninja builds need Debug artifacts
+# when the parent is Debug; multi-config generators select their config later.
+set(OPEN3D_EXTERNAL_PROJECT_BUILD_TYPE Release)
+if(WIN32 AND CMAKE_GENERATOR MATCHES "Ninja" AND
+   CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(OPEN3D_EXTERNAL_PROJECT_BUILD_TYPE Debug)
+endif()
+
 set(ExternalProject_CMAKE_ARGS
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5      # for VTK 9.1
     -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -173,9 +180,7 @@ set(ExternalProject_CMAKE_ARGS
     -DCMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}
     -DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION}
     -DCMAKE_INSTALL_LIBDIR=${Open3D_INSTALL_LIB_DIR}
-    # Always build 3rd party code in Release mode. Ignored by multi-config
-    # generators (XCode, MSVC). MSVC needs matching config anyway.
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_BUILD_TYPE=${OPEN3D_EXTERNAL_PROJECT_BUILD_TYPE}
     -DCMAKE_POLICY_DEFAULT_CMP0091:STRING=NEW
     -DCMAKE_MSVC_RUNTIME_LIBRARY:STRING=${CMAKE_MSVC_RUNTIME_LIBRARY}
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -262,6 +267,9 @@ endfunction()
 #        If not provided, PACKAGE_VERSION_VAR will default to <pkg>_VERSION.
 #    TARGETS <target> [<target> ...]
 #        the expected targets to be found in <pkg>
+#    TARGET_ALTERNATIVES <target> [<target> ...]
+#        alternative targets exported by <pkg>. The first existing target is
+#        linked, and the package is rejected if none of them exists.
 #    INCLUDE_DIRS
 #        the expected include directory variable names to be found in <pkg>.
 #        If <pkg> also defines targets, use them instead and pass them via TARGETS option.
@@ -276,13 +284,18 @@ endfunction()
 function(open3d_find_package_3rdparty_library name)
     cmake_parse_arguments(arg "PUBLIC;HEADER;REQUIRED;QUIET"
         "PACKAGE;VERSION;PACKAGE_VERSION_VAR"
-        "TARGETS;INCLUDE_DIRS;LIBRARIES;PATHS;DEPENDS" ${ARGN})
+        "TARGETS;TARGET_ALTERNATIVES;INCLUDE_DIRS;LIBRARIES;PATHS;DEPENDS" ${ARGN})
     if(arg_UNPARSED_ARGUMENTS)
         message(STATUS "Unparsed: ${arg_UNPARSED_ARGUMENTS}")
         message(FATAL_ERROR "Invalid syntax: open3d_find_package_3rdparty_library(${name} ${ARGN})")
     endif()
     if(NOT arg_PACKAGE)
         message(FATAL_ERROR "open3d_find_package_3rdparty_library: Expected value for argument PACKAGE")
+    endif()
+    if(arg_TARGETS AND arg_TARGET_ALTERNATIVES)
+        message(FATAL_ERROR
+            "open3d_find_package_3rdparty_library: TARGETS and "
+            "TARGET_ALTERNATIVES are mutually exclusive")
     endif()
     if(NOT arg_PACKAGE_VERSION_VAR)
         set(arg_PACKAGE_VERSION_VAR "${arg_PACKAGE}_VERSION")
@@ -302,10 +315,26 @@ function(open3d_find_package_3rdparty_library name)
     endif()
     find_package(${arg_PACKAGE} ${find_package_args})
     if(${arg_PACKAGE}_FOUND)
+        set(targets_to_link ${arg_TARGETS})
+        if(arg_TARGET_ALTERNATIVES)
+            foreach(target IN LISTS arg_TARGET_ALTERNATIVES)
+                if(TARGET ${target})
+                    set(targets_to_link ${target})
+                    break()
+                endif()
+            endforeach()
+            if(NOT targets_to_link)
+                message(STATUS
+                    "Unable to use installed third-party library ${name}: "
+                    "none of the expected targets exist (${arg_TARGET_ALTERNATIVES})")
+                set(${name}_FOUND FALSE PARENT_SCOPE)
+                return()
+            endif()
+        endif()
         message(STATUS "Using installed third-party library ${name} ${${arg_PACKAGE}_VERSION}")
         add_library(${name} INTERFACE)
-        if(arg_TARGETS)
-            foreach(target IN LISTS arg_TARGETS)
+        if(targets_to_link)
+            foreach(target IN LISTS targets_to_link)
                 if (TARGET ${target})
                     target_link_libraries(${name} INTERFACE ${target})
                 else()
@@ -326,7 +355,7 @@ function(open3d_find_package_3rdparty_library name)
         if(NOT BUILD_SHARED_LIBS OR arg_PUBLIC)
             install(TARGETS ${name} EXPORT ${PROJECT_NAME}Targets)
             # Ensure that imported targets will be found again.
-            if(arg_TARGETS)
+            if(targets_to_link)
                 list(APPEND Open3D_3RDPARTY_EXTERNAL_MODULES ${arg_PACKAGE})
                 set(Open3D_3RDPARTY_EXTERNAL_MODULES ${Open3D_3RDPARTY_EXTERNAL_MODULES} PARENT_SCOPE)
             endif()
@@ -489,6 +518,13 @@ if(BUILD_CUDA_MODULE)
     find_package(CUDAToolkit REQUIRED)
 endif()
 
+# When building only pybind (+ ML ops) against an installed Open3D devel
+# package, skip all heavy ExternalProjects (assimp, embree, vtk, filament, …).
+if(OPEN3D_USE_INSTALLED_LIBRARY)
+    include(${CMAKE_CURRENT_LIST_DIR}/find_dependencies_installed.cmake)
+    return()
+endif()
+
 # Threads
 open3d_find_package_3rdparty_library(3rdparty_threads
     REQUIRED
@@ -519,20 +555,6 @@ else()
     list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_assimp)
 endif()
 
-# OpenMP
-if(WITH_OPENMP)
-    open3d_find_package_3rdparty_library(3rdparty_openmp
-        PACKAGE OpenMP
-        PACKAGE_VERSION_VAR OpenMP_CXX_VERSION
-        TARGETS OpenMP::OpenMP_CXX
-    )
-    if(3rdparty_openmp_FOUND)
-        message(STATUS "Building with OpenMP")
-        list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_openmp)
-    else()
-        set(WITH_OPENMP OFF)
-    endif()
-endif()
 
 # X11
 if(UNIX AND NOT APPLE)
@@ -608,6 +630,24 @@ else()
     list(APPEND Open3D_3RDPARTY_PUBLIC_TARGETS_FROM_SYSTEM Open3D::3rdparty_eigen3)
 endif()
 
+# Vulkan-Headers
+include(${Open3D_3RDPARTY_DIR}/vulkan_headers/vulkan_headers.cmake)
+open3d_import_3rdparty_library(3rdparty_vulkan_headers
+    INCLUDE_DIRS ${VULKAN_HEADERS_INCLUDE_DIRS}
+    INCLUDE_ALL
+    DEPENDS      ext_vulkan_headers
+)
+list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_vulkan_headers)
+
+# Vulkan Memory Allocator
+include(${Open3D_3RDPARTY_DIR}/vkmemalloc/vkmemalloc.cmake)
+open3d_import_3rdparty_library(3rdparty_vkmemalloc
+    INCLUDE_DIRS ${VMA_INCLUDE_DIRS}
+    INCLUDE_ALL
+    DEPENDS      ext_vkmemalloc ext_vmahpp
+)
+list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_vkmemalloc)
+
 # Nanoflann
 if(USE_SYSTEM_NANOFLANN)
     open3d_find_package_3rdparty_library(3rdparty_nanoflann
@@ -655,9 +695,6 @@ if(NOT USE_SYSTEM_GLEW)
         INCLUDE_DIRS
             include/
     )
-    if(ENABLE_HEADLESS_RENDERING)
-        target_compile_definitions(3rdparty_glew PUBLIC GLEW_OSMESA)
-    endif()
     if(WIN32)
         target_compile_definitions(3rdparty_glew PUBLIC GLEW_STATIC)
     endif()
@@ -774,9 +811,10 @@ endif()
 
 # jsoncpp
 if(USE_SYSTEM_JSONCPP)
+    # Try JsonCpp::JsonCpp first (vcpkg), then jsoncpp_lib (system)
     open3d_find_package_3rdparty_library(3rdparty_jsoncpp
         PACKAGE jsoncpp
-        TARGETS jsoncpp_lib
+        TARGET_ALTERNATIVES JsonCpp::JsonCpp jsoncpp_lib jsoncpp_static
     )
     if(NOT 3rdparty_jsoncpp_FOUND)
         set(USE_SYSTEM_JSONCPP OFF)
@@ -871,18 +909,50 @@ endif()
 # - openssl.cmake needs to be included before curl.cmake, for the
 #   BORINGSSL_ROOT_DIR variable.
 if(USE_SYSTEM_CURL)
-    open3d_pkg_config_3rdparty_library(3rdparty_curl
-        SEARCH_ARGS libcurl
+    if(USE_SYSTEM_CURL_STATIC)
+        # CMake 3.28+ uses this hint to select a static libcurl.
+        set(CURL_USE_STATIC_LIBS ON)
+    endif()
+    # Prefer find_package over pkg-config for better vcpkg compatibility
+    open3d_find_package_3rdparty_library(3rdparty_curl
+        PACKAGE CURL
+        TARGETS CURL::libcurl
     )
+    if(NOT 3rdparty_curl_FOUND)
+        # Fallback to pkg-config if find_package fails
+        open3d_pkg_config_3rdparty_library(3rdparty_curl
+            SEARCH_ARGS libcurl
+        )
+    endif()
     if(NOT 3rdparty_curl_FOUND)
         set(USE_SYSTEM_CURL OFF)
     endif()
+    if(3rdparty_curl_FOUND)
+        set(_open3d_system_curl_static ${USE_SYSTEM_CURL_STATIC})
+        if(TARGET CURL::libcurl)
+            get_target_property(_open3d_curl_target_type CURL::libcurl TYPE)
+            if(_open3d_curl_target_type STREQUAL "STATIC_LIBRARY")
+                set(_open3d_system_curl_static ON)
+            endif()
+            unset(_open3d_curl_target_type)
+        endif()
+        if(_open3d_system_curl_static)
+            target_compile_definitions(3rdparty_curl INTERFACE CURL_STATICLIB)
+        endif()
+        unset(_open3d_system_curl_static)
+    endif()
+endif()
+
+# The bundled curl ExternalProject is configured against bundled BoringSSL.
+# Keep these two dependencies paired when curl falls back or is opted out.
+if(NOT USE_SYSTEM_CURL AND USE_SYSTEM_OPENSSL)
+    message(STATUS "Bundled curl requires bundled BoringSSL; setting USE_SYSTEM_OPENSSL=OFF")
+    set(USE_SYSTEM_OPENSSL OFF)
 endif()
 
 if(USE_SYSTEM_OPENSSL)
     open3d_find_package_3rdparty_library(3rdparty_openssl
         PACKAGE OpenSSL
-        REQUIRED
         TARGETS OpenSSL::Crypto
     )
     if(NOT 3rdparty_openssl_FOUND)
@@ -914,6 +984,8 @@ if(NOT USE_SYSTEM_CURL)
         LIBRARIES    ${CURL_LIBRARIES}
         DEPENDS      ext_zlib ext_curl
     )
+    # Bundled libcurl is always static; system/vcpkg CURL::libcurl sets this.
+    target_compile_definitions(3rdparty_curl INTERFACE CURL_STATICLIB)
     if(APPLE)
         # Missing frameworks: https://stackoverflow.com/a/56157695/1255535
         # Link frameworks   : https://stackoverflow.com/a/18330634/1255535
@@ -933,7 +1005,23 @@ if(NOT USE_SYSTEM_CURL)
     endif()
     target_link_libraries(3rdparty_curl INTERFACE 3rdparty_openssl)
 endif()
-list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_curl Open3D::3rdparty_openssl)
+# curl and openssl (BoringSSL) are mutually-referential static archives, so a
+# single left-to-right ld scan can fail depending on final link order. Wrap
+# them in a GNU ld archive group (UNIX non-Apple) to force rescanning. Use the
+# short "-Wl,-(" / "-Wl,-)" alias, not "--start-group"/"--end-group", since
+# CMake's link-line deduplication would otherwise collapse those with MKL's
+# identical GROUPED markers below, breaking both groups. Parens are escaped
+# because the link command runs via "/bin/sh -c" and "(" / ")" are shell
+# metacharacters.
+if(UNIX AND NOT APPLE)
+    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM
+        "-Wl,-\\("
+        Open3D::3rdparty_curl
+        Open3D::3rdparty_openssl
+        "-Wl,-\\)")
+else()
+    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_curl Open3D::3rdparty_openssl)
+endif()
 
 # PNG
 if(USE_SYSTEM_PNG)
@@ -971,6 +1059,77 @@ else()
     list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_png)
 endif()
 
+# SPZ and its compression dependencies.
+if(USE_SYSTEM_PNG)
+    find_package(ZLIB REQUIRED)
+endif()
+include(${Open3D_3RDPARTY_DIR}/zstd/zstd.cmake)
+if(USE_SYSTEM_ZSTD)
+    add_library(3rdparty_zstd INTERFACE)
+    target_link_libraries(3rdparty_zstd INTERFACE zstd::libzstd)
+else()
+    open3d_import_3rdparty_library(3rdparty_zstd
+        HIDDEN
+        INCLUDE_DIRS ${ZSTD_INCLUDE_DIRS}
+        LIB_DIR      ${ZSTD_LIB_DIR}
+        LIBRARIES    ${ZSTD_LIBRARIES}
+        DEPENDS      ext_zstd
+    )
+endif()
+include(${Open3D_3RDPARTY_DIR}/spz/spz.cmake)
+open3d_import_3rdparty_library(3rdparty_spz
+    HIDDEN
+    INCLUDE_DIRS ${SPZ_INCLUDE_DIRS}
+    LIB_DIR      ${SPZ_LIB_DIR}
+    LIBRARIES    ${SPZ_LIBRARIES}
+    DEPENDS      ext_spz
+)
+set(_spz_archive
+    "${SPZ_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}spz${CMAKE_STATIC_LIBRARY_SUFFIX}")
+set(_spz_iface_libs "$<BUILD_INTERFACE:${_spz_archive}>")
+if(USE_SYSTEM_ZSTD)
+    list(APPEND _spz_iface_libs zstd::libzstd)
+else()
+    # Shared Open3D + static spz/zstd: CMake may emit INTERFACE deps so libzstd.a
+    # precedes libspz.a, leaving unresolved ZSTD_* under one-pass GNU ld. Force
+    # absolute archive paths in the correct order on 3rdparty_spz. Do not add
+    # -Wl,--start-group/--end-group here: duplicate group markers collide with
+    # MKL's GROUPED import and empty its start/end-group (undefined mkl_*).
+    # Do not INTERFACE-link Open3D::3rdparty_zstd (avoids reordering).
+    set(_zstd_archive
+        "${ZSTD_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${ZSTD_LIBRARIES}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    list(APPEND _spz_iface_libs "$<BUILD_INTERFACE:${_zstd_archive}>")
+endif()
+# Preserve any INSTALL_INTERFACE entries from open3d_import_3rdparty_library.
+get_target_property(_spz_existing_libs 3rdparty_spz INTERFACE_LINK_LIBRARIES)
+if(_spz_existing_libs)
+    foreach(_item IN LISTS _spz_existing_libs)
+        if(_item MATCHES "INSTALL_INTERFACE")
+            list(APPEND _spz_iface_libs "${_item}")
+        endif()
+    endforeach()
+endif()
+if(NOT BUILD_SHARED_LIBS AND NOT USE_SYSTEM_ZSTD)
+    list(APPEND _spz_iface_libs
+        "$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${Open3D_INSTALL_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${PROJECT_NAME}_3rdparty_zstd${CMAKE_STATIC_LIBRARY_SUFFIX}>")
+endif()
+set_property(TARGET 3rdparty_spz PROPERTY INTERFACE_LINK_LIBRARIES "${_spz_iface_libs}")
+if(NOT USE_SYSTEM_ZSTD)
+    get_target_property(_zstd_link_opts 3rdparty_zstd INTERFACE_LINK_OPTIONS)
+    if(_zstd_link_opts)
+        target_link_options(3rdparty_spz INTERFACE ${_zstd_link_opts})
+    endif()
+endif()
+if(TARGET Open3D::3rdparty_zlib)
+    target_link_libraries(3rdparty_spz INTERFACE Open3D::3rdparty_zlib)
+else()
+    target_link_libraries(3rdparty_spz INTERFACE ZLIB::ZLIB)
+endif()
+list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_spz)
+unset(_spz_archive)
+unset(_spz_iface_libs)
+unset(_spz_existing_libs)
+
 # rply
 open3d_build_3rdparty_library(3rdparty_rply DIRECTORY rply
     SOURCES
@@ -991,11 +1150,19 @@ list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_tinyfil
 
 # tinygltf
 if(USE_SYSTEM_TINYGLTF)
-    open3d_find_package_3rdparty_library(3rdparty_tinygltf
-        PACKAGE TinyGLTF
-        TARGETS TinyGLTF::TinyGLTF
-    )
-    if(NOT 3rdparty_tinygltf_FOUND)
+    # vcpkg's tinygltf port is header-only and does not export a CMake target.
+    find_path(TINYGLTF_INCLUDE_DIR NAMES tiny_gltf.h)
+    if(TINYGLTF_INCLUDE_DIR)
+        message(STATUS "Using installed third-party library 3rdparty_tinygltf")
+        add_library(3rdparty_tinygltf INTERFACE)
+        target_include_directories(3rdparty_tinygltf SYSTEM INTERFACE
+            $<BUILD_INTERFACE:${TINYGLTF_INCLUDE_DIR}>)
+        if(NOT BUILD_SHARED_LIBS)
+            install(TARGETS 3rdparty_tinygltf EXPORT ${PROJECT_NAME}Targets)
+        endif()
+        add_library(${PROJECT_NAME}::3rdparty_tinygltf ALIAS 3rdparty_tinygltf)
+    else()
+        message(STATUS "Unable to find installed third-party library 3rdparty_tinygltf")
         set(USE_SYSTEM_TINYGLTF OFF)
     endif()
 endif()
@@ -1005,11 +1172,12 @@ if(NOT USE_SYSTEM_TINYGLTF)
         INCLUDE_DIRS ${TINYGLTF_INCLUDE_DIRS}
         DEPENDS      ext_tinygltf
     )
-    target_compile_definitions(3rdparty_tinygltf INTERFACE TINYGLTF_IMPLEMENTATION STB_IMAGE_IMPLEMENTATION STB_IMAGE_WRITE_IMPLEMENTATION)
     list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_tinygltf)
 else()
     list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_tinygltf)
 endif()
+target_compile_definitions(3rdparty_tinygltf INTERFACE
+    TINYGLTF_IMPLEMENTATION STB_IMAGE_IMPLEMENTATION STB_IMAGE_WRITE_IMPLEMENTATION)
 
 # tinyobjloader
 if(USE_SYSTEM_TINYOBJLOADER)
@@ -1161,10 +1329,29 @@ list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_poisson
 
 # Minizip
 if(WITH_MINIZIP)
-    open3d_pkg_config_3rdparty_library(3rdparty_minizip
-        SEARCH_ARGS minizip
+    # Prefer find_package over pkg-config for better vcpkg compatibility
+    open3d_find_package_3rdparty_library(3rdparty_minizip
+        PACKAGE minizip
+        QUIET
+        TARGET_ALTERNATIVES MINIZIP::minizip MINIZIP::minizipstatic
     )
-    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_minizip)
+    if(NOT 3rdparty_minizip_FOUND)
+        # Compatibility fallback for older vcpkg minizip packages.
+        open3d_find_package_3rdparty_library(3rdparty_minizip
+            PACKAGE unofficial-minizip
+            QUIET
+            TARGET_ALTERNATIVES unofficial::minizip::minizip
+        )
+    endif()
+    if(NOT 3rdparty_minizip_FOUND)
+        # Fallback to pkg-config
+        open3d_pkg_config_3rdparty_library(3rdparty_minizip
+            SEARCH_ARGS minizip
+        )
+    endif()
+    if(3rdparty_minizip_FOUND)
+        list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_minizip)
+    endif()
 endif()
 
 # Googletest
@@ -1245,11 +1432,11 @@ if(BUILD_GUI)
             message(STATUS "Building third-party library Filament from source")
             if(MSVC OR (CMAKE_C_COMPILER_ID MATCHES ".*Clang" AND
                 CMAKE_CXX_COMPILER_ID MATCHES ".*Clang"
-                AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 7))
+                AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 17))
                 set(FILAMENT_C_COMPILER "${CMAKE_C_COMPILER}")
                 set(FILAMENT_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
             else()
-                message(STATUS "Filament can only be built with Clang >= 7")
+                message(STATUS "Filament requires Clang >= 17 for C++20 ranges support")
                 # First, check default version, because the user may have configured
                 # a particular version as default for a reason.
                 find_program(CLANG_DEFAULT_CC NAMES clang)
@@ -1257,7 +1444,7 @@ if(BUILD_GUI)
                 if(CLANG_DEFAULT_CC AND CLANG_DEFAULT_CXX)
                     execute_process(COMMAND ${CLANG_DEFAULT_CXX} --version OUTPUT_VARIABLE clang_version)
                     if(clang_version MATCHES "clang version ([0-9]+)")
-                        if (CMAKE_MATCH_1 GREATER_EQUAL 7)
+                        if(CMAKE_MATCH_1 GREATER_EQUAL 17)
                             message(STATUS "Using ${CLANG_DEFAULT_CXX} to build Filament")
                             set(FILAMENT_C_COMPILER "${CLANG_DEFAULT_CC}")
                             set(FILAMENT_CXX_COMPILER "${CLANG_DEFAULT_CXX}")
@@ -1266,42 +1453,21 @@ if(BUILD_GUI)
                 endif()
                 # If the default version is not sufficient, look for some specific versions
                 if(NOT FILAMENT_C_COMPILER OR NOT FILAMENT_CXX_COMPILER)
-                    find_program(CLANG_VERSIONED_CC NAMES
-                                 clang-19
-                                 clang-18
-                                 clang-17
-                                 clang-16
-                                 clang-15
-                                 clang-14
-                                 clang-13
-                                 clang-12
-                                 clang-11
-                                 clang-10
-                                 clang-9
-                                 clang-8
-                                 clang-7
-                    )
-                    find_program(CLANG_VERSIONED_CXX NAMES
-                                 clang++-19
-                                 clang++-18
-                                 clang++-17
-                                 clang++-16
-                                 clang++-15
-                                 clang++-14
-                                 clang++-13
-                                 clang++-12
-                                 clang++-11
-                                 clang++-10
-                                 clang++-9
-                                 clang++-8
-                                 clang++-7
-                    )
+                    set(filament_clang_candidates
+                        clang-19 clang-18 clang-17)
+                    set(filament_clangxx_candidates
+                        clang++-19 clang++-18 clang++-17)
+                    find_program(CLANG_VERSIONED_CC NAMES ${filament_clang_candidates})
+                    find_program(CLANG_VERSIONED_CXX NAMES ${filament_clangxx_candidates})
                     if (CLANG_VERSIONED_CC AND CLANG_VERSIONED_CXX)
                         set(FILAMENT_C_COMPILER "${CLANG_VERSIONED_CC}")
                         set(FILAMENT_CXX_COMPILER "${CLANG_VERSIONED_CXX}")
                         message(STATUS "Using ${CLANG_VERSIONED_CXX} to build Filament")
                     else()
-                        message(FATAL_ERROR "Need Clang >= 7 to compile Filament from source")
+                        message(FATAL_ERROR
+                            "Need Clang >= 17 with matching libc++/libc++abi to compile "
+                            "Filament from source. It uses C++20 ranges algorithms "
+                            "unavailable in older libc++ releases.")
                     endif()
                 endif()
             endif()
@@ -1315,9 +1481,11 @@ if(BUILD_GUI)
                 # find_library. Therefore, when compiling Filament from source,
                 # we explicitly find the corresponding path based on the clang
                 # version.
-                execute_process(COMMAND ${FILAMENT_CXX_COMPILER} --version OUTPUT_VARIABLE clang_version)
-                if(clang_version MATCHES "clang version ([0-9]+)")
-                    set(CLANG_LIBDIR "/usr/lib/llvm-${CMAKE_MATCH_1}/lib")
+                if(NOT CLANG_LIBDIR)
+                    execute_process(COMMAND ${FILAMENT_CXX_COMPILER} --version OUTPUT_VARIABLE clang_version)
+                    if(clang_version MATCHES "clang version ([0-9]+)")
+                        set(CLANG_LIBDIR "/usr/lib/llvm-${CMAKE_MATCH_1}/lib")
+                    endif()
                 endif()
             endif()
             include(${Open3D_3RDPARTY_DIR}/filament/filament_build.cmake)
@@ -1338,10 +1506,16 @@ if(BUILD_GUI)
                 set(FILAMENT_RUNTIME_VER x86_64)
             endif()
         else()  # WIN32
-            if (STATIC_WINDOWS_RUNTIME)
-                set(FILAMENT_RUNTIME_VER "x86_64/mt$<$<CONFIG:DEBUG>:d>")
+            if (BUILD_FILAMENT_FROM_SOURCE)
+                set(FILAMENT_RUNTIME_VER x86_64)
             else()
-                set(FILAMENT_RUNTIME_VER "x86_64/md$<$<CONFIG:DEBUG>:d>")
+                # Match the prebuilt Filament archive's runtime selection in
+                # filament_download.cmake.
+                if (STATIC_WINDOWS_RUNTIME)
+                    set(FILAMENT_RUNTIME_VER "x86_64/mt$<$<CONFIG:DEBUG>:d>")
+                else()
+                    set(FILAMENT_RUNTIME_VER "x86_64/md$<$<CONFIG:DEBUG>:d>")
+                endif()
             endif()
         endif()
         open3d_import_3rdparty_library(3rdparty_filament
@@ -1353,14 +1527,23 @@ if(BUILD_GUI)
         )
         set(FILAMENT_MATC "${FILAMENT_ROOT}/bin/matc")
         target_link_libraries(3rdparty_filament INTERFACE Open3D::3rdparty_threads ${CMAKE_DL_LIBS})
-        if(UNIX AND NOT APPLE)
+        if(WIN32 AND NOT BUILD_FILAMENT_FROM_SOURCE AND
+           NOT FILAMENT_PRECOMPILED_ROOT)
+            target_link_libraries(3rdparty_filament INTERFACE
+                $<$<CONFIG:Debug>:${FILAMENT_ROOT}/lib/x86_64/${FILAMENT_DEBUG_TAG}/${CMAKE_STATIC_LIBRARY_PREFIX}matdbg${CMAKE_STATIC_LIBRARY_SUFFIX}>
+                $<$<CONFIG:Debug>:${FILAMENT_ROOT}/lib/x86_64/${FILAMENT_DEBUG_TAG}/${CMAKE_STATIC_LIBRARY_PREFIX}filamat${CMAKE_STATIC_LIBRARY_SUFFIX}>
+            )
+        endif()
+        if(UNIX AND NOT APPLE AND NOT FILAMENT_USE_STATIC_LIBCXX_STDABI)
             # For ubuntu, llvm libs are located in /usr/lib/llvm-{version}/lib.
             # We first search for these paths, and then search CMake's default
             # search path. LLVM version must be >= 7 to compile Filament.
             if (NOT CLANG_LIBDIR)
-                message(STATUS "Searching /usr/lib/llvm-[7..19]/lib/ for libc++ and libc++abi")
-                foreach(llvm_ver RANGE 7 19)
+                message(STATUS "Searching /usr/lib/llvm-[7..20]/lib/ for libc++ and libc++abi")
+                foreach(llvm_ver RANGE 7 20)
                     set(llvm_lib_dir "/usr/lib/llvm-${llvm_ver}/lib")
+                    unset(CPP_LIBRARY CACHE)
+                    unset(CPPABI_LIBRARY CACHE)
                     find_library(CPP_LIBRARY    c++ PATHS ${llvm_lib_dir} NO_DEFAULT_PATH)
                     find_library(CPPABI_LIBRARY c++abi PATHS ${llvm_lib_dir} NO_DEFAULT_PATH)
                     if (CPP_LIBRARY AND CPPABI_LIBRARY)
@@ -1377,6 +1560,7 @@ if(BUILD_GUI)
             if (NOT CLANG_LIBDIR)
                 message(STATUS "Clang C++ libraries not found. Searching other paths...")
                 find_library(CPPABI_LIBRARY c++abi PATH_SUFFIXES
+                             llvm-20/lib
                              llvm-19/lib
                              llvm-18/lib
                              llvm-17/lib
@@ -1403,13 +1587,17 @@ if(BUILD_GUI)
             else()
                 message(FATAL_ERROR "Cannot find matching libc++ and libc++abi libraries with version >=7.")
             endif()
-            find_library(CPP_LIBRARY    c++    PATHS ${CLANG_LIBDIR} REQUIRED NO_DEFAULT_PATH)
-            find_library(CPPABI_LIBRARY c++abi PATHS ${CLANG_LIBDIR} REQUIRED NO_DEFAULT_PATH)
+            unset(CPP_LIBRARY CACHE)
+            unset(CPPABI_LIBRARY CACHE)
+            find_library(CPP_LIBRARY c++ PATHS ${CLANG_LIBDIR}
+                         ${CLANG_LIBDIR}/x86_64-unknown-linux-gnu REQUIRED NO_DEFAULT_PATH)
+            find_library(CPPABI_LIBRARY c++abi PATHS ${CLANG_LIBDIR}
+                         ${CLANG_LIBDIR}/x86_64-unknown-linux-gnu REQUIRED NO_DEFAULT_PATH)
 
             # Ensure that libstdc++ gets linked first.
             target_link_libraries(3rdparty_filament INTERFACE -lstdc++
-                                  ${CPP_LIBRARY}.1 ${CPPABI_LIBRARY})
-            message(STATUS "Filament C++ libraries: ${CPP_LIBRARY}.1 ${CPPABI_LIBRARY}")
+                                  ${CPP_LIBRARY} ${CPPABI_LIBRARY})
+            message(STATUS "Filament C++ libraries: ${CPP_LIBRARY} ${CPPABI_LIBRARY}")
             if (LIBCPP_VERSION GREATER 11)
                 message(WARNING "libc++ (LLVM) version ${LIBCPP_VERSION} > 11 includes libunwind that "
                 "interferes with the system libunwind.so.8 and may crash Python code when exceptions "
@@ -1431,29 +1619,37 @@ if(BUILD_GUI)
     endif() # if(NOT USE_SYSTEM_FILAMENT)
 endif()
 
-# Headless rendering
-if (ENABLE_HEADLESS_RENDERING)
-    open3d_find_package_3rdparty_library(3rdparty_opengl
-        REQUIRED
-        PACKAGE OSMesa
-        INCLUDE_DIRS OSMESA_INCLUDE_DIR
-        LIBRARIES OSMESA_LIBRARY
-    )
-else()
-    open3d_find_package_3rdparty_library(3rdparty_opengl
-        PACKAGE OpenGL
-        TARGETS OpenGL::GL
-    )
-    set(USE_SYSTEM_OPENGL ON)
-endif()
+# OpenGL. Headless rendering on Linux uses a GPU-accelerated offscreen EGL
+# context (see EGLOffscreenContext) instead of a software OSMesa build, so
+# there is no separate headless configuration here.
+open3d_find_package_3rdparty_library(3rdparty_opengl
+    PACKAGE OpenGL
+    TARGETS OpenGL::GL
+)
+set(USE_SYSTEM_OPENGL ON)
 list(APPEND Open3D_3RDPARTY_HEADER_TARGETS_FROM_SYSTEM Open3D::3rdparty_opengl)
 
 # RPC interface
 # zeromq
 if(USE_SYSTEM_ZEROMQ)
-    open3d_pkg_config_3rdparty_library(3rdparty_zeromq SEARCH_ARGS libzmq)
+    # cppzmq carries its ZeroMQ link dependency and provides zmq.hpp.
+    open3d_find_package_3rdparty_library(3rdparty_zeromq
+        PACKAGE cppzmq
+        QUIET
+        TARGET_ALTERNATIVES cppzmq cppzmq-static
+    )
     if(NOT 3rdparty_zeromq_FOUND)
-        set(USE_USE_SYSTEM_ZEROMQ OFF)
+        open3d_find_package_3rdparty_library(3rdparty_zeromq
+            PACKAGE ZeroMQ
+            QUIET
+            TARGET_ALTERNATIVES libzmq libzmq-static
+        )
+    endif()
+    if(NOT 3rdparty_zeromq_FOUND)
+        open3d_pkg_config_3rdparty_library(3rdparty_zeromq SEARCH_ARGS libzmq)
+    endif()
+    if(NOT 3rdparty_zeromq_FOUND)
+        set(USE_SYSTEM_ZEROMQ OFF)
     endif()
 endif()
 if(NOT USE_SYSTEM_ZEROMQ)
@@ -1544,8 +1740,10 @@ if(NOT USE_SYSTEM_VTK)
     if(UNIX AND NOT APPLE)
         target_link_libraries(3rdparty_vtk INTERFACE ${CMAKE_DL_LIBS})
     endif()
+    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_vtk)
+else()
+    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_vtk)
 endif()
-list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_vtk)
 
 # UVAtlas
 include(${Open3D_3RDPARTY_DIR}/uvatlas/uvatlas.cmake)
@@ -1577,8 +1775,57 @@ if(BUILD_SYCL_MODULE)
     list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_sycl)
 endif()
 
+# sycl-tla: SYCL Templates for Linear Algebra (Intel fork of CUTLASS v4.2.1).
+# Provides CUTLASS-compatible headers for Intel GPU ML ops via SYCL.
+# Actual kernel porting is handled separately; this only sets up the include path.
 if(BUILD_SYCL_MODULE)
-    option(OPEN3D_USE_ONEAPI_PACKAGES "Use the oneAPI distribution of MKL/TBB." ON)
+    if(USE_SYSTEM_SYCL_TLA)
+        find_path(3rdparty_sycl_tla_INCLUDE_DIR NAMES cutlass/cutlass.h)
+        if(3rdparty_sycl_tla_INCLUDE_DIR)
+            add_library(3rdparty_sycl_tla INTERFACE)
+            target_include_directories(3rdparty_sycl_tla INTERFACE
+                ${3rdparty_sycl_tla_INCLUDE_DIR})
+            target_compile_definitions(3rdparty_sycl_tla INTERFACE
+                CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET)
+            add_library(Open3D::3rdparty_sycl_tla ALIAS 3rdparty_sycl_tla)
+            if(NOT BUILD_SHARED_LIBS)
+                install(TARGETS 3rdparty_sycl_tla EXPORT ${PROJECT_NAME}Targets)
+            endif()
+        else()
+            set(USE_SYSTEM_SYCL_TLA OFF)
+        endif()
+    endif()
+    if(NOT USE_SYSTEM_SYCL_TLA)
+        include(${Open3D_3RDPARTY_DIR}/sycl_tla/sycl_tla.cmake)
+        open3d_import_3rdparty_library(3rdparty_sycl_tla
+            INCLUDE_DIRS ${SYCL_TLA_INCLUDE_DIRS}
+            DEPENDS      ext_sycl_tla
+        )
+        # sycl-tla requires these two defines to enable its SYCL/Intel-GPU code
+        # paths (see cutlass/gpu_generics.h and cute/algorithm/reorder.hpp);
+        # without them the headers either omit the SYCL device-info shims or
+        # fail to compile the Xe DPAS (tensor core) dispatch entirely.
+        target_compile_definitions(3rdparty_sycl_tla INTERFACE
+            CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET)
+    endif()
+    # sycl-tla's Xe DPAS mainloop/epilogue kernels use SPIR-V features (e.g.
+    # split control-flow barriers) that are not enabled by default when
+    # targeting the generic "spir64" JIT target; the SPIR-V translator's
+    # link step fails ("Feature requires ... SPV_INTEL_split_barrier")
+    # without explicitly opting in. This mirrors the flags sycl-tla's own
+    # CMake (cmake/FindDPCPP.cmake) adds when building its own examples/
+    # tests, and is required for any target that links in sycl-tla-based
+    # GEMM code (e.g. the SYCL PyTorch conv ops).
+    if(CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM")
+        target_link_options(3rdparty_sycl_tla INTERFACE
+            "-Xspirv-translator"
+            "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate")
+    endif()
+    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_sycl_tla)
+endif()
+
+if(BUILD_SYCL_MODULE)
+    set(OPEN3D_USE_ONEAPI_PACKAGES ON CACHE BOOL "Use the oneAPI distribution of MKL/TBB." FORCE)
 else()
     option(OPEN3D_USE_ONEAPI_PACKAGES "Use the oneAPI distribution of MKL/TBB." OFF)
 endif()
@@ -1588,18 +1835,93 @@ if(OPEN3D_USE_ONEAPI_PACKAGES)
     # 1. oneMKL
     # /opt/intel/oneapi/mkl/latest/lib/cmake/mkl
     set(MKL_THREADING tbb_thread)
-    set(MKL_LINK static)
+    # oneAPI >= 2026.0 dropped the static SYCL MKL libraries (libmkl_sycl*.a),
+    # and the shared replacements resolve the CPU MKL routines they call
+    # (cblas_*_64) at load time from a *shared* CPU MKL in the process. So a
+    # Linux/macOS SYCL build links all of MKL dynamically; CPU-only oneAPI
+    # builds and Windows (which has import libraries) keep the static link.
+    if(BUILD_SYCL_MODULE AND NOT WIN32)
+        set(MKL_LINK dynamic)
+    else()
+        set(MKL_LINK static)
+    endif()
     find_package(MKL REQUIRED)
+    # oneAPI MKL's lib layout differs by platform: Linux nests libs under an
+    # "intel64" subdirectory, while Windows (verified with oneAPI 2025.3)
+    # places them directly in "lib".
+    if(WIN32)
+        set(MKL_LIB_DIR ${MKL_ROOT}/lib)
+    else()
+        set(MKL_LIB_DIR ${MKL_ROOT}/lib/intel64)
+    endif()
+
+    # Libraries linked statically by open3d_import_3rdparty_library, and (on
+    # Linux/macOS SYCL builds) the shared libraries linked by absolute path
+    # afterwards. Of the SYCL domains, only the ones Open3D calls are linked
+    # (blas: Matmul/AddMM, lapack: LU/SVD/Solve/Inverse/LeastSquares) instead of
+    # the libmkl_sycl.so umbrella, which is a linker script covering all domains
+    # and would add DT_NEEDED entries for domains (vm, stats, data_fitting) that
+    # the oneMKL pip packages do not ship.
+    set(MKL_STATIC_LIBS mkl_intel_ilp64 mkl_tbb_thread mkl_core)
+    set(MKL_SHARED_LIBRARIES)
+    if(WIN32)
+        # oneMKL's Release TBB threading archive uses /MD. Select its Debug
+        # variant for /MDd builds to avoid CRT mismatches and its object count
+        # contributing to the MSVC linker limit.
+        set(MKL_STATIC_LIBS
+            mkl_intel_ilp64
+            $<IF:$<CONFIG:Debug>,mkl_tbb_threadd,mkl_tbb_thread>
+            mkl_core)
+    endif()
+    if(BUILD_SYCL_MODULE)
+        if(WIN32)
+            # oneAPI >= 2026.0 dropped the umbrella mkl_sycl(d).lib import
+            # library on Windows too (same removal as libmkl_sycl.a on
+            # Linux/macOS, see the oneAPI >= 2026.0 comment above); link only
+            # the two domains Open3D actually calls (blas, lapack).
+            list(PREPEND MKL_STATIC_LIBS
+                $<IF:$<CONFIG:Debug>,mkl_sycl_blasd_dll,mkl_sycl_blas_dll>
+                $<IF:$<CONFIG:Debug>,mkl_sycl_lapackd_dll,mkl_sycl_lapack_dll>
+            )
+        else()
+            set(MKL_STATIC_LIBS)
+            foreach(mkl_lib IN ITEMS mkl_sycl_blas mkl_sycl_lapack
+                                     mkl_intel_ilp64 mkl_tbb_thread mkl_core)
+                find_library(MKL_${mkl_lib}_LIBRARY
+                    NAMES ${mkl_lib}
+                    PATHS ${MKL_LIB_DIR}
+                    NO_DEFAULT_PATH
+                    REQUIRED
+                )
+                list(APPEND MKL_SHARED_LIBRARIES ${MKL_${mkl_lib}_LIBRARY})
+                mark_as_advanced(MKL_${mkl_lib}_LIBRARY)
+            endforeach()
+        endif()
+    endif()
+
     open3d_import_3rdparty_library(3rdparty_mkl
         HIDDEN
         GROUPED
         INCLUDE_DIRS ${MKL_INCLUDE}/
-        LIB_DIR      ${MKL_ROOT}/lib/intel64
-        LIBRARIES    $<$<BOOL:${BUILD_SYCL_MODULE}>:mkl_sycl> mkl_intel_ilp64 mkl_tbb_thread mkl_core
+        LIB_DIR      ${MKL_LIB_DIR}
+        LIBRARIES    ${MKL_STATIC_LIBS}
     )
     if (BUILD_SYCL_MODULE)
     # target_link_options(3rdparty_mkl INTERFACE "-Wl,-export-dynamic")
-        target_link_libraries(3rdparty_mkl INTERFACE OpenCL)
+        if (WIN32)
+            find_package(OpenCL REQUIRED)
+            target_link_libraries(3rdparty_mkl INTERFACE OpenCL::OpenCL)
+            if(NOT BUILD_SHARED_LIBS)
+                # Static builds export Open3D::3rdparty_mkl (whose link interface
+                # carries the OpenCL::OpenCL imported target) in Open3DTargets.cmake,
+                # so a downstream find_package(Open3D) must re-find OpenCL to
+                # recreate that target (see CUDAToolkit above for the same pattern).
+                list(APPEND Open3D_3RDPARTY_EXTERNAL_MODULES "OpenCL")
+            endif()
+        else()
+            target_link_libraries(3rdparty_mkl INTERFACE
+                ${MKL_SHARED_LIBRARIES} OpenCL)
+        endif()
     endif()
     # MKL definitions
     target_compile_options(3rdparty_mkl INTERFACE "$<$<PLATFORM_ID:Linux,Darwin>:$<$<COMPILE_LANGUAGE:CXX>:-m64>>")
@@ -1610,11 +1932,15 @@ if(OPEN3D_USE_ONEAPI_PACKAGES)
 
     # 2. oneTBB
     # /opt/intel/oneapi/tbb/latest/lib/cmake/tbb
+    # 2021.4.0 is the minimum version providing tbb/collaborative_call_once.h.
     open3d_find_package_3rdparty_library(3rdparty_tbb
+        PUBLIC
         PACKAGE TBB
+        VERSION 2021.4.0
         TARGETS TBB::tbb
     )
-    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_tbb)
+    list(APPEND Open3D_3RDPARTY_EXTERNAL_MODULES TBB)
+    list(APPEND Open3D_3RDPARTY_PUBLIC_TARGETS_FROM_SYSTEM Open3D::3rdparty_tbb)
 
 else(OPEN3D_USE_ONEAPI_PACKAGES)
     # MKL/BLAS
@@ -1752,20 +2078,26 @@ else(OPEN3D_USE_ONEAPI_PACKAGES)
     endif()
 
     # TBB
+    # Minimum version 2021.4.0 is required for tbb/collaborative_call_once.h,
+    # used by utility::ProgressBar. Bundled TBB (mkl/tbb.cmake) is newer.
     if(USE_SYSTEM_TBB)
         open3d_find_package_3rdparty_library(3rdparty_tbb
             PACKAGE TBB
+            VERSION 2021.4.0
             TARGETS TBB::tbb
         )
+        list(APPEND Open3D_3RDPARTY_EXTERNAL_MODULES TBB)
         if(NOT 3rdparty_tbb_FOUND)
             set(USE_SYSTEM_TBB OFF)
         endif()
     endif()
     if(NOT USE_SYSTEM_TBB)
         include(${Open3D_3RDPARTY_DIR}/mkl/tbb.cmake)
-        list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_tbb)
+        # TBB is a public dependency: TBB types and headers appear in public
+        # Open3D headers (e.g. core/ParallelFor.h, utility/ProgressBar.h).
+        list(APPEND Open3D_3RDPARTY_PUBLIC_TARGETS_FROM_CUSTOM Open3D::3rdparty_tbb)
     else()
-        list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_tbb)
+        list(APPEND Open3D_3RDPARTY_PUBLIC_TARGETS_FROM_SYSTEM Open3D::3rdparty_tbb)
     endif()
 
 endif(OPEN3D_USE_ONEAPI_PACKAGES)
@@ -1773,12 +2105,11 @@ endif(OPEN3D_USE_ONEAPI_PACKAGES)
 # cuBLAS
 if(BUILD_CUDA_MODULE)
     if(WIN32)
-        # Nvidia does not provide static libraries for Windows. We don't release
-        # pip wheels for Windows with CUDA support at the moment. For the pip
-        # wheels to support CUDA on Windows out-of-the-box, we need to either
-        # ship the CUDA toolkit with the wheel (e.g. PyTorch can make use of the
-        # cudatoolkit conda package), or have a mechanism to locate the CUDA
-        # toolkit from the system.
+        # Nvidia does not provide static libraries for Windows, so CUDA is
+        # linked dynamically. The open3d-cuda pip wheel ships the required
+        # NVIDIA CUDA runtime DLLs via the nvidia-*-cu12 pip packages listed in
+        # python/requirements_win_cuda.txt (installed as a wheel dependency;
+        # see python/open3d/__init__.py for how they are located at runtime).
         list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM CUDA::cudart CUDA::cusolver CUDA::cublas)
     else()
         # CMake docs   : https://cmake.org/cmake/help/latest/module/FindCUDAToolkit.html
@@ -1930,6 +2261,11 @@ if (BUILD_CUDA_MODULE)
 endif ()
 
 # embree
+if(BUILD_SYCL_MODULE AND USE_SYSTEM_EMBREE)
+    message(STATUS
+        "Open3D's SYCL module requires a SYCL-enabled Embree; using bundled Embree")
+    set(USE_SYSTEM_EMBREE OFF)
+endif()
 if(USE_SYSTEM_EMBREE)
     open3d_find_package_3rdparty_library(3rdparty_embree
         PACKAGE embree
@@ -1949,8 +2285,10 @@ if(NOT USE_SYSTEM_EMBREE)
         LIBRARIES    ${EMBREE_LIBRARIES}
         DEPENDS      ext_embree
     )
+    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_embree)
+else()
+    list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_SYSTEM Open3D::3rdparty_embree)
 endif()
-list(APPEND Open3D_3RDPARTY_PRIVATE_TARGETS_FROM_CUSTOM Open3D::3rdparty_embree)
 
 # WebRTC
 if(BUILD_WEBRTC)
@@ -1970,11 +2308,43 @@ if(BUILD_WEBRTC)
     open3d_import_3rdparty_library(3rdparty_webrtc
         HIDDEN
         INCLUDE_DIRS ${WEBRTC_INCLUDE_DIRS}
-        LIB_DIR      ${WEBRTC_LIB_DIR}
-        LIBRARIES    ${WEBRTC_LIBRARIES}
         DEPENDS      ext_webrtc_all
     )
+    # webrtc/webrtc_extra need custom --whole-archive handling (below), so
+    # they can't use open3d_import_3rdparty_library()'s LIBRARIES option.
+    # Install them manually and reference $<INSTALL_INTERFACE:...> paths, so
+    # examples built against an installed *static* Open3D package (i.e. not
+    # from within this build tree) still link against them; see the
+    # LIBRARIES branch of open3d_import_3rdparty_library() for reference.
+    if(NOT BUILD_SHARED_LIBS)
+        foreach(_o3d_webrtc_lib webrtc webrtc_extra)
+            install(FILES "${WEBRTC_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${_o3d_webrtc_lib}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+                DESTINATION ${Open3D_INSTALL_LIB_DIR}
+                RENAME "${CMAKE_STATIC_LIBRARY_PREFIX}${PROJECT_NAME}_3rdparty_webrtc_${_o3d_webrtc_lib}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        endforeach()
+    endif()
+    set(WEBRTC_INSTALLED_LIB
+        "$<INSTALL_PREFIX>/${Open3D_INSTALL_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${PROJECT_NAME}_3rdparty_webrtc")
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(3rdparty_webrtc INTERFACE
+            "-Wl,--whole-archive"
+            "$<BUILD_INTERFACE:${WEBRTC_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}webrtc${CMAKE_STATIC_LIBRARY_SUFFIX}>"
+            "$<INSTALL_INTERFACE:${WEBRTC_INSTALLED_LIB}_webrtc${CMAKE_STATIC_LIBRARY_SUFFIX}>"
+            "-Wl,--no-whole-archive"
+            "$<BUILD_INTERFACE:${WEBRTC_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}webrtc_extra${CMAKE_STATIC_LIBRARY_SUFFIX}>"
+            "$<INSTALL_INTERFACE:${WEBRTC_INSTALLED_LIB}_webrtc_extra${CMAKE_STATIC_LIBRARY_SUFFIX}>")
+    else()
+        target_link_libraries(3rdparty_webrtc INTERFACE
+            "$<BUILD_INTERFACE:${WEBRTC_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}webrtc${CMAKE_STATIC_LIBRARY_SUFFIX}>"
+            "$<INSTALL_INTERFACE:${WEBRTC_INSTALLED_LIB}_webrtc${CMAKE_STATIC_LIBRARY_SUFFIX}>"
+            "$<BUILD_INTERFACE:${WEBRTC_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}webrtc_extra${CMAKE_STATIC_LIBRARY_SUFFIX}>"
+            "$<INSTALL_INTERFACE:${WEBRTC_INSTALLED_LIB}_webrtc_extra${CMAKE_STATIC_LIBRARY_SUFFIX}>")
+    endif()
     target_link_libraries(3rdparty_webrtc INTERFACE Open3D::3rdparty_threads ${CMAKE_DL_LIBS})
+    # libwebrtc.a and libturbojpeg.a both export jpeg_* symbols (WebRTC bundles libjpeg).
+    if(UNIX AND NOT APPLE)
+        target_link_options(3rdparty_webrtc INTERFACE "LINKER:--allow-multiple-definition")
+    endif()
     if (MSVC) # https://github.com/iimachines/webrtc-build/issues/2#issuecomment-503535704
         target_link_libraries(3rdparty_webrtc INTERFACE secur32 winmm dmoguids wmcodecdspuuid msdmo strmiids)
     endif()

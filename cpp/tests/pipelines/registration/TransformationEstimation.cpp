@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -323,6 +323,56 @@ TEST(TransformationEstimation, DCRegDegeneracyAnalysisCylinder) {
     EXPECT_NE(analysis.coordinate_frame_.find("left-multiplied SE(3)"),
               std::string::npos);
     EXPECT_EQ(analysis.solver_type_, "minimum_norm");
+}
+
+
+TEST(TransformationEstimation, DCRegCylinderAxisPermutationParity) {
+    const geometry::PointCloud target = MakeCylinderSideTarget();
+    geometry::PointCloud source = target;
+    source.Translate(Eigen::Vector3d(-0.12, 0.05, -0.35));
+    const auto corres = MakeIdentityCorrespondences(source.points_.size());
+
+    // A proper cyclic rotation maps the cylinder's unobservable z axis to x.
+    Eigen::Matrix3d axis_permutation;
+    axis_permutation << 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0;
+    geometry::PointCloud rotated_target = target;
+    geometry::PointCloud rotated_source = source;
+    rotated_target.Rotate(axis_permutation, Eigen::Vector3d::Zero());
+    rotated_source.Rotate(axis_permutation, Eigen::Vector3d::Zero());
+
+    pipelines::registration::TransformationEstimationPointToPlaneDCReg dcreg;
+    const Eigen::Matrix4d reference =
+            dcreg.ComputeTransformation(source, target, corres);
+    const Eigen::Matrix4d rotated =
+            dcreg.ComputeTransformation(rotated_source, rotated_target, corres);
+    ASSERT_TRUE(reference.allFinite());
+    ASSERT_TRUE(rotated.allFinite());
+
+    const Eigen::Matrix3d expected_rotation =
+            axis_permutation * reference.block<3, 3>(0, 0) *
+            axis_permutation.transpose();
+    const Eigen::Vector3d expected_translation =
+            axis_permutation * reference.block<3, 1>(0, 3);
+    EXPECT_LT((rotated.block<3, 3>(0, 0) - expected_rotation).norm(), 1e-8);
+    EXPECT_LT((rotated.block<3, 1>(0, 3) - expected_translation).norm(), 1e-8);
+    EXPECT_LT((expected_translation - Eigen::Vector3d(0.0, 0.12, -0.05))
+                      .norm(),
+              1e-8);
+
+    const auto analysis =
+            pipelines::registration::ComputeDCRegDegeneracyAnalysis(
+                    rotated_source, rotated_target, corres);
+    ASSERT_TRUE(analysis.is_rank_deficient_);
+    EXPECT_EQ(analysis.weak_rotation_axes_(0), 1);
+    EXPECT_EQ(analysis.weak_rotation_axes_(1), 0);
+    EXPECT_EQ(analysis.weak_rotation_axes_(2), 0);
+    EXPECT_EQ(analysis.weak_translation_axes_(0), 1);
+    EXPECT_EQ(analysis.weak_translation_axes_(1), 0);
+    EXPECT_EQ(analysis.weak_translation_axes_(2), 0);
+    EXPECT_EQ(analysis.weak_rotation_axes_description_, "x");
+    EXPECT_EQ(analysis.weak_translation_axes_description_, "x");
+    EXPECT_NE(analysis.coordinate_frame_.find("target/world"),
+              std::string::npos);
 }
 
 TEST(TransformationEstimation, DCRegLocalRegistrationUsesLocalPlane) {

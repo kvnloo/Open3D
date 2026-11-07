@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -70,6 +70,8 @@ public:
 
     Size GetWindowSize(OSWindow w) const override;
     void SetWindowSize(OSWindow w, int width, int height) override;
+
+    Size GetWindowFrameSize(OSWindow w) const override;
 
     Size GetWindowSizePixels(OSWindow w) const override;
     void SetWindowSizePixels(OSWindow w, const Size& size) override;

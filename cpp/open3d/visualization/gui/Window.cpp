@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -11,9 +11,13 @@
 #include <imgui_internal.h>  // so we can examine the current context
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <queue>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -53,6 +57,25 @@ void UpdateImGuiForScaling(float new_scaling) {
     ImGuiStyle& style = ImGui::GetStyle();
     // FrameBorderSize is not adjusted (we want minimal borders)
     style.FrameRounding *= new_scaling;
+}
+
+enum class DebugHudEnvMode { kNone, kFps, kFrameTime };
+
+DebugHudEnvMode ParseOpen3dDebugHudMode() {
+    const char* env = std::getenv("OPEN3D_DEBUG");
+    if (!env || env[0] == '\0') {
+        return DebugHudEnvMode::kNone;
+    }
+    std::string debugconfig(env);
+    std::transform(debugconfig.begin(), debugconfig.end(), debugconfig.begin(),
+                   ::tolower);
+    if (debugconfig.find("frametime") != std::string::npos) {
+        return DebugHudEnvMode::kFrameTime;
+    }
+    if (debugconfig.find("fps") != std::string::npos) {
+        return DebugHudEnvMode::kFps;
+    }
+    return DebugHudEnvMode::kNone;
 }
 
 void ChangeAllRenderQuality(
@@ -221,6 +244,11 @@ struct Window::Impl {
     // guarantee if it is a child widget.
     std::shared_ptr<Dialog> active_dialog_;
 
+    /// Optional FPS / frametime HUD (not in \c children_; see DrawOnce).
+    std::shared_ptr<Label> debug_hud_label_;
+    float debug_hud_frametime_ms_ = 0.0f;
+    float debug_hud_fps_ = 0.0f;
+
     std::queue<std::function<void()>> deferred_until_before_draw_;
     std::queue<std::function<void()>> deferred_until_draw_;
     Widget* mouse_grabber_widget_ = nullptr;  // only if not ImGUI widget
@@ -230,6 +258,7 @@ struct Window::Impl {
     bool wants_auto_center_ = false;
     bool needs_layout_ = true;
     bool needs_redraw_ = true;  // set by PostRedraw to defer if already drawing
+    bool redraw_pending_ = false;
     bool is_resizing_ = false;
     bool is_drawing_ = false;
 };
@@ -388,6 +417,10 @@ void Window::CreateRenderer() {
             Application::GetInstance().GetWindowSystem().CreateRenderer(
                     impl_->window_);
     impl_->renderer_->SetClearColor({1.0f, 1.0f, 1.0f, 1.0f});
+    // Widgets record ImGui commands before GS composite output is produced.
+    // Draw once more so they can bind the newly valid overlay texture.
+    impl_->renderer_->SetOnGaussianCompositeComplete(
+            [this]() { PostRedraw(); });
 
     impl_->imgui_.imgui_bridge =
             std::make_unique<ImguiFilamentBridge>(impl_->renderer_, GetSize());
@@ -576,10 +609,23 @@ void Window::PostRedraw() {
     // (see the implementation for details).
     if (impl_->is_drawing_) {
         impl_->needs_redraw_ = true;
-    } else {
-        Application::GetInstance().GetWindowSystem().PostRedrawEvent(
-                impl_->window_);
+        return;
     }
+
+    // macOS rejects redraw requests while the application is still starting.
+    // Do not mark the request pending in that state; the native window's first
+    // expose/refresh event will trigger the initial draw once the run loop is
+    // active.
+    if (!Application::GetInstance().IsRunning()) {
+        return;
+    }
+
+    if (impl_->redraw_pending_) {
+        return;
+    }
+    impl_->redraw_pending_ = true;
+    Application::GetInstance().GetWindowSystem().PostRedrawEvent(
+            impl_->window_);
 }
 
 void Window::RaiseToTop() const {
@@ -669,6 +715,16 @@ void Window::ShowMessageBox(const char* title, const char* message) {
     layout->AddChild(Horiz::MakeCentered(ok));
     dlg->AddChild(layout);
     ShowDialog(dlg);
+}
+
+void Window::SetClipboardText(const std::string& text) {
+    Application::GetInstance().GetWindowSystem().SetClipboardText(
+            impl_->window_, text.c_str());
+}
+
+std::string Window::GetClipboardText() const {
+    return Application::GetInstance().GetWindowSystem().GetClipboardText(
+            impl_->window_);
 }
 
 void Window::ShowMenu(bool show) {
@@ -896,6 +952,46 @@ Widget::DrawResult Window::DrawOnce(bool is_layout_pass) {
         ImGui::PopStyleVar(2);
     }
 
+    // OPEN3D_DEBUG: optional FPS / frametime overlay (top-left of content
+    // area).
+    {
+        static const DebugHudEnvMode hud_mode = ParseOpen3dDebugHudMode();
+        if (hud_mode == DebugHudEnvMode::kNone) {
+            impl_->debug_hud_label_.reset();
+        } else {
+            if (!impl_->debug_hud_label_) {
+                impl_->debug_hud_label_ = std::make_shared<Label>("");
+                impl_->debug_hud_label_->SetTextColor(theme.text_color);
+            }
+            if (impl_->debug_hud_frametime_ms_ > 1000.0f ||
+                impl_->debug_hud_fps_ > 60.0f) {
+                char buf[64];
+                if (hud_mode == DebugHudEnvMode::kFrameTime) {
+                    auto frametime_ms = impl_->debug_hud_frametime_ms_ /
+                                        impl_->debug_hud_fps_;
+                    std::snprintf(buf, sizeof(buf), "%.0f ms", frametime_ms);
+                } else {
+                    auto fps = impl_->debug_hud_fps_ * 1000.0f /
+                               impl_->debug_hud_frametime_ms_;
+                    std::snprintf(buf, sizeof(buf), "%.1f FPS", fps);
+                }
+                impl_->debug_hud_label_->SetText(buf);
+                impl_->debug_hud_frametime_ms_ = 0.0f;
+                impl_->debug_hud_fps_ = 0.0f;
+            }
+            impl_->debug_hud_label_->SetVisible(true);
+            LayoutContext layout_ctx = GetLayoutContext();
+            const Size pref = impl_->debug_hud_label_->CalcPreferredSize(
+                    layout_ctx, Widget::Constraints());
+            const int margin =
+                    std::max(4, theme.default_margin / 2 + theme.font_size / 8);
+            const Rect cr = GetContentRect();
+            impl_->debug_hud_label_->SetFrame(Rect(cr.x + margin, cr.y + margin,
+                                                   pref.width, pref.height));
+            impl_->debug_hud_label_->DrawOverlay(dc);
+        }
+    }
+
     // Finish frame and generate the commands
     ImGui::PopFont();
     ImGui::EndFrame();
@@ -908,9 +1004,17 @@ Widget::DrawResult Window::DrawOnce(bool is_layout_pass) {
     // draw, and if we are drawing for layout purposes, don't actually
     // draw, because we are just going to draw again after this returns.
     if (!is_layout_pass) {
+        using clock = std::chrono::steady_clock;
+        const clock::time_point t0 = clock::now();
         impl_->renderer_->BeginFrame();
         impl_->renderer_->Draw();
         impl_->renderer_->EndFrame();
+        const clock::time_point t1 = clock::now();
+        if (impl_->renderer_->LastBeginFrameSubmitted()) {
+            impl_->debug_hud_frametime_ms_ +=
+                    std::chrono::duration<float, std::milli>(t1 - t0).count();
+            impl_->debug_hud_fps_++;
+        }
     }
 
     if (needs_layout) {
@@ -923,6 +1027,7 @@ Widget::DrawResult Window::DrawOnce(bool is_layout_pass) {
 }
 
 void Window::OnDraw() {
+    impl_->redraw_pending_ = false;
     impl_->is_drawing_ = true;
     bool needed_layout = impl_->needs_layout_;
 
@@ -989,15 +1094,13 @@ void Window::OnResize() {
             ImGui::PopFont();
             ImGui::EndFrame();
 
-            w = std::min(screen_size.width,
+            // screen_size is the monitor work area; SetWindowSize sets the
+            // content size, so subtract the window-decoration extents before
+            // clamping to keep the outer window inside the work area.
+            auto frame_size = ws.GetWindowFrameSize(impl_->window_);
+            w = std::min(screen_size.width - frame_size.width,
                          int(std::round(pref.width / impl_->imgui_.scaling)));
-            // screen_height is the screen height, not the usable screen height.
-            // If we cannot call glfwGetMonitorWorkarea(), then we need to guess
-            // at the size. The window titlebar is about 2 * em, and then there
-            // is often a global menubar (Linux/GNOME, macOS) or a toolbar
-            // (Windows). A toolbar is somewhere around 2 - 3 ems.
-            int unusable_height = 4 * impl_->theme_.font_size;
-            h = std::min(screen_size.height - unusable_height,
+            h = std::min(screen_size.height - frame_size.height,
                          int(std::round(pref.height / impl_->imgui_.scaling)));
             ws.SetWindowSize(impl_->window_, w, h);
         }

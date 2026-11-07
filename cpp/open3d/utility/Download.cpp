@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -21,8 +21,6 @@
 #define USE_SSLEAY
 #define USE_OPENSSL
 #endif
-
-#define CURL_STATICLIB
 
 #include <curl/curl.h>
 #include <curl/easy.h>

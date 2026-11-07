@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -78,6 +78,11 @@ public:
     virtual void EndFrame() = 0;
 
     virtual void SetOnAfterDraw(std::function<void()> callback) = 0;
+
+    /// Returns whether the most recent BeginFrame() accepted a swap-chain
+    /// frame (Filament \c beginFrame returned true). Used for diagnostics;
+    /// defaults to false for backends that do not track this.
+    virtual bool LastBeginFrameSubmitted() const { return false; }
 
     virtual MaterialHandle AddMaterial(const ResourceLoadRequest& request) = 0;
     virtual MaterialInstanceHandle AddMaterialInstance(

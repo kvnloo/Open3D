@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -108,6 +108,11 @@ public:
         return fitness_ > other.fitness_ || (fitness_ == other.fitness_ &&
                                              inlier_rmse_ < other.inlier_rmse_);
     }
+
+    RegistrationResult(const RegistrationResult &) = default;
+    RegistrationResult(RegistrationResult &&) = default;
+    RegistrationResult &operator=(const RegistrationResult &) = default;
+    RegistrationResult &operator=(RegistrationResult &&) = default;
 
 public:
     /// The estimated transformation matrix.
