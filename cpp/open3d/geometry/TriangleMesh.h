@@ -62,13 +62,14 @@ public:
 public:
     TriangleMesh &operator+=(const TriangleMesh &mesh);
     TriangleMesh operator+(const TriangleMesh &mesh) const;
-    /// \brief Compare ordered vertex positions and triangle indices.
+    /// \brief Compare vertex and oriented triangle geometry, not indices.
     ///
-    /// Vertex positions use Eigen's approximate comparison, and triangle
-    /// indices use exact comparison. Normals, colors, and other attributes
-    /// are not considered; reindexing an otherwise identical mesh may change
-    /// the result. Geometric equivalence independent of indexing is not
-    /// currently implemented.
+    /// Vertex and triangle order and cyclic face rotations are ignored.
+    /// Coincident vertices and repeated faces retain their multiplicity,
+    /// but coincident vertex IDs are indistinguishable. Reversing face winding
+    /// changes equality. Positions use Eigen's relative isApprox tolerance
+    /// after deterministic sorting; non-finite positions are unequal.
+    /// Normals, colors, UVs, textures, and materials are excluded.
     bool operator==(const TriangleMesh &mesh) const;
 
     /// Returns `true` if the mesh contains triangles.

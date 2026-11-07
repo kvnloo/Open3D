@@ -8,6 +8,8 @@
 #include "open3d/geometry/TriangleMesh.h"
 
 #include <Eigen/Dense>
+#include <algorithm>
+#include <array>
 #include <numeric>
 #include <queue>
 #include <tuple>
@@ -114,17 +116,98 @@ TriangleMesh TriangleMesh::operator+(const TriangleMesh &mesh) const {
 }
 
 bool TriangleMesh::operator==(const TriangleMesh &mesh) const {
-    if (vertices_.size() != mesh.vertices_.size()) return false;
-    if (triangles_.size() != mesh.triangles_.size()) return false;
-
-    for (unsigned long i = 0; i < vertices_.size(); ++i) {
-        if (!vertices_[i].isApprox(mesh.vertices_[i])) return false;
+    if (vertices_.size() != mesh.vertices_.size() ||
+        triangles_.size() != mesh.triangles_.size()) {
+        return false;
     }
 
-    for (unsigned long i = 0; i < triangles_.size(); ++i) {
-        if (triangles_[i] != mesh.triangles_[i]) return false;
+    // Compare a triangle soup rather than index numbers. Keep vertex and face
+    // multiplicity, face orientation, and Eigen's existing relative tolerance.
+    const auto vertex_less = [](const Eigen::Vector3d &a,
+                                const Eigen::Vector3d &b) {
+        for (int i = 0; i < 3; ++i) {
+            if (a[i] < b[i]) return true;
+            if (b[i] < a[i]) return false;
+        }
+        return false;
+    };
+    for (const auto &v : vertices_) {
+        if (!v.allFinite()) return false;
+    }
+    for (const auto &v : mesh.vertices_) {
+        if (!v.allFinite()) return false;
     }
 
+    auto lhs_vertices = vertices_;
+    auto rhs_vertices = mesh.vertices_;
+    std::sort(lhs_vertices.begin(), lhs_vertices.end(), vertex_less);
+    std::sort(rhs_vertices.begin(), rhs_vertices.end(), vertex_less);
+    for (size_t i = 0; i < lhs_vertices.size(); ++i) {
+        if (!lhs_vertices[i].isApprox(rhs_vertices[i])) return false;
+    }
+
+    // Canonicalize the full cyclic corner sequence (not just the smallest
+    // corner), since coincident corners can tie without matching rotations.
+    using OrientedFace = std::array<Eigen::Vector3d, 3>;
+    const auto collect_faces =
+            [&vertex_less](const TriangleMesh &source,
+                           std::vector<OrientedFace> &faces) {
+                faces.reserve(source.triangles_.size());
+                for (const auto &triangle : source.triangles_) {
+                    for (int corner = 0; corner < 3; ++corner) {
+                        const int index = triangle[corner];
+                        if (index < 0 ||
+                            static_cast<size_t>(index) >=
+                                    source.vertices_.size()) {
+                            return false;
+                        }
+                    }
+                    const auto rotation_less = [&](int a, int b) {
+                        for (int corner = 0; corner < 3; ++corner) {
+                            const auto &va =
+                                    source.vertices_[triangle[(a + corner) % 3]];
+                            const auto &vb =
+                                    source.vertices_[triangle[(b + corner) % 3]];
+                            if (vertex_less(va, vb)) return true;
+                            if (vertex_less(vb, va)) return false;
+                        }
+                        return false;
+                    };
+                    int first = 0;
+                    for (int start = 1; start < 3; ++start) {
+                        if (rotation_less(start, first)) first = start;
+                    }
+                    OrientedFace face;
+                    for (int corner = 0; corner < 3; ++corner) {
+                        face[corner] =
+                                source.vertices_[triangle[(first + corner) % 3]];
+                    }
+                    faces.push_back(face);
+                }
+                return true;
+            };
+    std::vector<OrientedFace> lhs_faces;
+    std::vector<OrientedFace> rhs_faces;
+    if (!collect_faces(*this, lhs_faces) || !collect_faces(mesh, rhs_faces)) {
+        return false;
+    }
+    const auto face_less = [&vertex_less](const OrientedFace &a,
+                                          const OrientedFace &b) {
+        for (int corner = 0; corner < 3; ++corner) {
+            if (vertex_less(a[corner], b[corner])) return true;
+            if (vertex_less(b[corner], a[corner])) return false;
+        }
+        return false;
+    };
+    std::sort(lhs_faces.begin(), lhs_faces.end(), face_less);
+    std::sort(rhs_faces.begin(), rhs_faces.end(), face_less);
+    for (size_t i = 0; i < lhs_faces.size(); ++i) {
+        for (int corner = 0; corner < 3; ++corner) {
+            if (!lhs_faces[i][corner].isApprox(rhs_faces[i][corner])) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 
