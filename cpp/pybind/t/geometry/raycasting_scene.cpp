@@ -67,6 +67,26 @@ Args:
     device (open3d.core.Device): The device to use. Currently CPU and SYCL devices are supported.
 )doc");
 
+    raycasting_scene.def(py::init<const RaycastingScene&>(), "other"_a, R"doc(
+Create a deep copy of another scene, including its geometry and build settings.
+
+Args:
+    other (open3d.t.geometry.RaycastingScene): The scene to copy.
+
+Example:
+    >>> clone = o3d.t.geometry.RaycastingScene(scene)
+)doc");
+
+    // Both Python copy protocols produce independent native Embree scenes.
+    raycasting_scene.def("__copy__",
+                         [](const RaycastingScene& self) {
+                             return RaycastingScene(self);
+                         });
+    raycasting_scene.def("__deepcopy__",
+                         [](const RaycastingScene& self, py::dict /* memo */) {
+                             return RaycastingScene(self);
+                         });
+
     raycasting_scene.def(
             "add_triangles",
             py::overload_cast<const core::Tensor&, const core::Tensor&>(

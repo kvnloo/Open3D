@@ -35,6 +35,20 @@ public:
 
     ~RaycastingScene();
 
+    /// \brief Deep-copy a RaycastingScene, including its geometry buffers.
+    /// The copy has its own Embree scene and preserves the build thread count.
+    RaycastingScene(const RaycastingScene &other);
+
+    /// \brief Replace this scene with a deep copy of another scene.
+    /// Existing Embree resources are released when the assignment succeeds.
+    RaycastingScene &operator=(const RaycastingScene &other);
+
+    /// \brief Transfer the native scene and device without copying geometry.
+    RaycastingScene(RaycastingScene &&other) noexcept;
+
+    /// \brief Transfer ownership, releasing the old scene and device.
+    RaycastingScene &operator=(RaycastingScene &&other) noexcept;
+
     /// \brief Add a triangle mesh to the scene.
     /// \param vertex_positions Vertices as Tensor of dim {N,3} and dtype float.
     /// \param triangle_indices Triangles as Tensor of dim {M,3} and dtype
