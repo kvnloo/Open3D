@@ -6,9 +6,12 @@
 // ----------------------------------------------------------------------------
 
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <memory>
 
 #include "open3d/io/FeatureIO.h"
+#include "open3d/io/OctreeIO.h"
 #include "open3d/utility/FileSystem.h"
 #include "open3d/utility/Logging.h"
 
@@ -81,6 +84,49 @@ bool WriteFeatureToBIN(const std::string &filename,
     bool success = WriteMatrixXdToBINFile(fid, feature.data_);
     fclose(fid);
     return success;
+}
+
+bool ReadOctreeBinaryStreamFromBIN(const std::string &filename,
+                                   std::string &bin_data) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        utility::LogWarning("Read BIN failed: unable to open file: {}",
+                            filename);
+        return false;
+    }
+
+    // Read file contents into bin_data
+    bin_data.assign((std::istreambuf_iterator<char>(file)),
+                    std::istreambuf_iterator<char>());
+    if (file.bad()) {
+        utility::LogWarning("Read BIN failed: error reading file: {}",
+                            filename);
+        return false;
+    }
+
+    file.close();
+    return true;
+}
+
+bool WriteOctreeBinaryStreamToBIN(const std::string &filename,
+                                  const std::string &bin_data) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        utility::LogWarning("Write BIN failed: unable to open file: {}",
+                            filename);
+        return false;
+    }
+
+    file.write(bin_data.data(), bin_data.size());
+    if (!file) {
+        utility::LogWarning("Write BIN failed: error writing to file: {}",
+                            filename);
+        file.close();
+        return false;
+    }
+
+    file.close();
+    return true;
 }
 
 }  // namespace io

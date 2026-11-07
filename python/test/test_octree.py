@@ -8,6 +8,9 @@
 import open3d as o3d
 import numpy as np
 import os
+import struct
+
+import pytest
 
 _eight_cubes_colors = np.array([
     [0.0, 0.0, 0.0],
@@ -140,3 +143,69 @@ def test_locate_leaf_node():
         assert node_info.depth == max_depth
         # Leaf node's size must match
         assert node_info.size == octree.size / np.power(2, max_depth)
+
+
+def test_octree_bin_empty_roundtrip(tmp_path):
+    source = o3d.geometry.Octree(2, [0, 0, 0], 2.0)
+    filename = tmp_path / "empty.bin"
+    assert o3d.io.write_octree(str(filename), source)
+    assert filename.stat().st_size == 40
+    restored = o3d.io.read_octree(str(filename))
+    assert restored.root_node is None
+    assert restored.max_depth == 2
+    assert restored.size == 2.0
+    np.testing.assert_array_equal(restored.origin, [0, 0, 0])
+
+
+@pytest.mark.parametrize(
+    "depth, points, colors, byte_count",
+    [
+        (0, [[0.5, 0.5, 0.5]], [[1.0, 0.0, 0.0]], 84),
+        (1, [[0.5, 0.5, 0.5], [1.5, 1.5, 1.5]],
+         [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], 155),
+    ],
+)
+def test_octree_bin_colored_leaves_roundtrip(
+        tmp_path, depth, points, colors, byte_count):
+    source = o3d.geometry.Octree(depth, [0, 0, 0], 2.0)
+    initialize = o3d.geometry.OctreeColorLeafNode.get_init_function()
+    for point, color in zip(points, colors):
+        update = o3d.geometry.OctreeColorLeafNode.get_update_function(
+            np.asarray(color, dtype=np.float64))
+        source.insert_point(np.asarray(point, dtype=np.float64),
+                            initialize, update)
+
+    filename = tmp_path / "colored.bin"
+    assert o3d.io.write_octree(str(filename), source)
+    assert filename.stat().st_size == byte_count
+    restored = o3d.io.read_octree(str(filename))
+    assert restored.max_depth == depth
+    assert restored.size == 2.0
+    np.testing.assert_array_equal(restored.origin, [0, 0, 0])
+    for point, color in zip(points, colors):
+        node, _ = restored.locate_leaf_node(np.asarray(point, dtype=np.float64))
+        assert isinstance(node, o3d.geometry.OctreeColorLeafNode)
+        np.testing.assert_array_equal(node.color, color)
+
+
+_BIN_HEADER = struct.pack("=4dQ", 0.0, 0.0, 0.0, 2.0, 2)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _BIN_HEADER[:-1],  # Truncated metadata.
+        _BIN_HEADER + b"\xff",  # Invalid root tag.
+        _BIN_HEADER + b"OctreeColorLeafNode\x00" + bytes(23),  # Short color.
+        _BIN_HEADER + b"OctreeColorLeafNode\x00" + bytes(24) + b"\xff",
+    ],
+)
+def test_octree_bin_rejects_malformed_data(tmp_path, payload):
+    filename = tmp_path / "invalid.bin"
+    filename.write_bytes(payload)
+    restored = o3d.io.read_octree(str(filename))
+    # Python I/O creates a default Octree when C++ parsing fails.
+    assert restored.root_node is None
+    assert restored.max_depth == 0
+    assert restored.size == 0.0
+    np.testing.assert_array_equal(restored.origin, [0, 0, 0])

@@ -21,6 +21,7 @@ static const std::unordered_map<
         std::function<bool(const std::string &, geometry::Octree &)>>
         file_extension_to_octree_read_function{
                 {"json", ReadOctreeFromJson},
+                {"bin", ReadOctreeFromBIN},
         };
 
 static const std::unordered_map<
@@ -28,6 +29,7 @@ static const std::unordered_map<
         std::function<bool(const std::string &, const geometry::Octree &)>>
         file_extension_to_octree_write_function{
                 {"json", WriteOctreeToJson},
+                {"bin", WriteOctreeToBIN},
         };
 
 std::shared_ptr<geometry::Octree> CreateOctreeFromFile(
@@ -90,5 +92,24 @@ bool WriteOctreeToJson(const std::string &filename,
                        const geometry::Octree &octree) {
     return WriteIJsonConvertibleToJSON(filename, octree);
 }
+
+bool ReadOctreeFromBIN(const std::string &filename, geometry::Octree &octree) {
+    std::string bin_data;
+    if (!ReadOctreeBinaryStreamFromBIN(filename, bin_data)) {
+        return false;
+    }
+    // Preserve parse failure status for both C++ and Python callers.
+    return octree.DeserializeFromBinaryStream(bin_data);
+}
+
+bool WriteOctreeToBIN(const std::string &filename,
+                      const geometry::Octree &octree) {
+    std::string bin_data;
+    if (!octree.SerializeToBinaryStream(bin_data)) {
+        return false;
+    }
+    return WriteOctreeBinaryStreamToBIN(filename, bin_data);
+}
+
 }  // namespace io
 }  // namespace open3d

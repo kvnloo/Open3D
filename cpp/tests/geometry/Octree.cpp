@@ -406,5 +406,81 @@ TEST(Octree, ConvertToJsonValue) {
     EXPECT_TRUE(src_octree == dst_octree);
 }
 
+TEST(Octree, ConvertFromBinaryStream) {
+    geometry::PointCloud pcd;
+    data::PLYPointCloud pointcloud_ply;
+    io::ReadPointCloud(pointcloud_ply.GetPath(), pcd);
+    size_t max_depth = 5;
+    geometry::Octree src_octree(max_depth);
+    src_octree.ConvertFromPointCloud(pcd, 0.01);
+
+    // Serialize to binary
+    std::string binary_data;
+    src_octree.SerializeToBinaryStream(binary_data);
+
+    // Deserialize from binary
+    geometry::Octree dst_octree;
+    dst_octree.DeserializeFromBinaryStream(binary_data);
+
+    EXPECT_TRUE(src_octree == dst_octree);
+}
+
+TEST(Octree, BinaryStreamParseContract) {
+    const Eigen::Vector3d origin(0, 0, 0);
+    geometry::Octree leaf(0, origin, 2.0);
+    leaf.InsertPoint(Eigen::Vector3d(0.5, 0.5, 0.5),
+                     geometry::OctreeColorLeafNode::GetInitFunction(),
+                     geometry::OctreeColorLeafNode::GetUpdateFunction(
+                             Eigen::Vector3d(1, 0, 0)));
+
+    std::string leaf_bytes;
+    ASSERT_TRUE(leaf.SerializeToBinaryStream(leaf_bytes));
+    ASSERT_EQ(leaf_bytes.size(), 84u);
+    geometry::Octree destination(leaf);
+    EXPECT_FALSE(destination.DeserializeFromBinaryStream(
+            leaf_bytes.substr(0, leaf_bytes.size() - 1)));
+    EXPECT_TRUE(destination == leaf);
+    EXPECT_FALSE(destination.DeserializeFromBinaryStream(
+            leaf_bytes + std::string(1, '\xff')));
+    EXPECT_TRUE(destination == leaf);
+
+    geometry::Octree empty(2, origin, 2.0);
+    std::string header;
+    ASSERT_TRUE(empty.SerializeToBinaryStream(header));
+    ASSERT_EQ(header.size(), 40u);
+    EXPECT_TRUE(destination.DeserializeFromBinaryStream(header));
+    EXPECT_TRUE(destination == empty);
+    EXPECT_EQ(destination.root_node_, nullptr);
+
+    EXPECT_FALSE(destination.DeserializeFromBinaryStream(header.substr(0, 39)));
+    EXPECT_TRUE(destination == empty);
+    EXPECT_FALSE(destination.DeserializeFromBinaryStream(
+            header + std::string(1, '\xff')));
+    EXPECT_TRUE(destination == empty);
+
+    // Two colored leaves: 40-byte header + 27-byte internal node + 2 * 44.
+    geometry::Octree two_leaves(1, origin, 2.0);
+    two_leaves.InsertPoint(
+            Eigen::Vector3d(0.5, 0.5, 0.5),
+            geometry::OctreeColorLeafNode::GetInitFunction(),
+            geometry::OctreeColorLeafNode::GetUpdateFunction(
+                    Eigen::Vector3d(1, 0, 0)));
+    two_leaves.InsertPoint(
+            Eigen::Vector3d(1.5, 1.5, 1.5),
+            geometry::OctreeColorLeafNode::GetInitFunction(),
+            geometry::OctreeColorLeafNode::GetUpdateFunction(
+                    Eigen::Vector3d(0, 0, 1)));
+    std::string two_bytes;
+    ASSERT_TRUE(two_leaves.SerializeToBinaryStream(two_bytes));
+    ASSERT_EQ(two_bytes.size(), 155u);
+    EXPECT_TRUE(destination.DeserializeFromBinaryStream(two_bytes));
+    EXPECT_TRUE(destination == two_leaves);
+
+    // Reject a child-presence flag other than 0 or 1; keep the loaded tree.
+    two_bytes[40 + sizeof("OctreeInternalNode")] = 2;
+    EXPECT_FALSE(destination.DeserializeFromBinaryStream(two_bytes));
+    EXPECT_TRUE(destination == two_leaves);
+}
+
 }  // namespace tests
 }  // namespace open3d
