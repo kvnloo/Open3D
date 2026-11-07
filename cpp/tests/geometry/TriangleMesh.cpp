@@ -75,6 +75,53 @@ TEST(TriangleMesh, Constructor) {
     EXPECT_FALSE(tm.HasTriangleNormals());
 }
 
+TEST(TriangleMesh, CopyPreservesMeshBaseAttributes) {
+    geometry::TriangleMesh mesh({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}},
+                                {{0, 1, 2}});
+    mesh.vertex_normals_ = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+    mesh.vertex_colors_ = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    mesh.triangle_normals_ = {{0, 0, 1}};
+    mesh.triangle_uvs_ = {{0, 0}, {1, 0}, {0, 1}};
+    mesh.adjacency_list_ = {{1, 2}, {0, 2}, {0, 1}};
+
+    // A copy must retain all three MeshBase arrays and derived attributes.
+    geometry::TriangleMesh copied(mesh);
+    EXPECT_EQ(3u, copied.vertices_.size());
+    EXPECT_EQ(3u, copied.vertex_normals_.size());
+    EXPECT_EQ(3u, copied.vertex_colors_.size());
+    EXPECT_EQ(1u, copied.triangles_.size());
+    EXPECT_EQ(3u, copied.triangle_uvs_.size());
+    ExpectMeshEQ(mesh, copied);
+    EXPECT_EQ(mesh.adjacency_list_, copied.adjacency_list_);
+
+    geometry::TriangleMesh assigned;
+    assigned = mesh;
+    ExpectMeshEQ(mesh, assigned);
+
+    // A copy owns independent storage for normals and colors.
+    mesh.vertex_normals_[0] = {1, 0, 0};
+    mesh.vertex_colors_[0] = {0, 0, 0};
+    EXPECT_EQ(Eigen::Vector3d(0, 0, 1), copied.vertex_normals_[0]);
+    EXPECT_EQ(Eigen::Vector3d(1, 0, 0), copied.vertex_colors_[0]);
+}
+
+TEST(TriangleMesh, EqualityUsesIndexedGeometry) {
+    geometry::TriangleMesh mesh({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}},
+                                {{0, 1, 2}});
+    geometry::TriangleMesh same(mesh);
+    EXPECT_TRUE(mesh == same);
+
+    // The proposed equality is about indexed geometry, not appearance.
+    same.vertex_colors_ = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    EXPECT_TRUE(mesh == same);
+
+    same.triangles_[0] = {0, 2, 1};
+    EXPECT_FALSE(mesh == same);
+    same.triangles_[0] = {0, 1, 2};
+    same.vertices_[1] = {2, 0, 0};
+    EXPECT_FALSE(mesh == same);
+}
+
 TEST(TriangleMesh, DISABLED_MemberData) { NotImplemented(); }
 
 TEST(TriangleMesh, Clear) {

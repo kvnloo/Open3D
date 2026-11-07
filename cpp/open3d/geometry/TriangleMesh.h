@@ -44,20 +44,11 @@ public:
                  const std::vector<Eigen::Vector3i> &triangles)
         : MeshBase(Geometry::GeometryType::TriangleMesh, vertices),
           triangles_(triangles) {}
-    /// \brief Copy Constructor.
+    /// \brief Copy every base and derived mesh attribute.
     ///
-    /// \param mesh other mesh to copy.
-    TriangleMesh(const TriangleMesh &mesh)
-        : MeshBase(Geometry::GeometryType::TriangleMesh, mesh.vertices_),
-          // vertex_normals_(mesh.vertex_normals_),
-          // vertex_colors_(mesh.vertex_colors_),
-          triangles_(mesh.triangles_),
-          triangle_normals_(mesh.triangle_normals_),
-          adjacency_list_(mesh.adjacency_list_),
-          triangle_uvs_(mesh.triangle_uvs_),
-          materials_(mesh.materials_),
-          triangle_material_ids_(mesh.triangle_material_ids_),
-          textures_(mesh.textures_) {}
+    /// The default copy constructor retains MeshBase vertex normals and
+    /// colors as well as TriangleMesh's triangle-specific attributes.
+    TriangleMesh(const TriangleMesh &) = default;
     TriangleMesh &operator=(const TriangleMesh &) = default;
     ~TriangleMesh() override {}
 
@@ -71,6 +62,13 @@ public:
 public:
     TriangleMesh &operator+=(const TriangleMesh &mesh);
     TriangleMesh operator+(const TriangleMesh &mesh) const;
+    /// \brief Compare ordered vertex positions and triangle indices.
+    ///
+    /// Vertex positions use Eigen's approximate comparison, and triangle
+    /// indices use exact comparison. Normals, colors, and other attributes
+    /// are not considered; reindexing an otherwise identical mesh may change
+    /// the result. Geometric equivalence independent of indexing is not
+    /// currently implemented.
     bool operator==(const TriangleMesh &mesh) const;
 
     /// Returns `true` if the mesh contains triangles.

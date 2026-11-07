@@ -57,7 +57,10 @@ void pybind_trianglemesh_definitions(py::module &m) {
                  })
             .def(py::self + py::self)
             .def(py::self += py::self)
-            .def(py::self == py::self)
+            .def(py::self == py::self,
+                 "Compare ordered vertex positions and triangle indices. "
+                 "Normals, colors, and other attributes are ignored; this "
+                 "is not independent of vertex indexing.")
             .def("compute_triangle_normals",
                  &TriangleMesh::ComputeTriangleNormals,
                  "Function to compute triangle normals, usually called before "
