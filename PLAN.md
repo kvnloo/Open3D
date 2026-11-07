@@ -75,11 +75,11 @@ report useful run KPIs without requiring ground truth.
 | Global correction | Implemented | Accepted autonomous or scheduled GT edges trigger Open3D LM optimization and keyframe-map rebuild |
 | Serialization | Implemented | Map PLY, trajectory NPZ, pose-graph JSON, and per-frame CSV writers are present |
 | End-of-run KPIs | Implemented | `build_run_summary()` aggregates run, tracking, performance, loop, trajectory, map, and optional accuracy metrics; `print_and_save_summary()` prints a subset and writes JSON |
-| Expanded documentation | Complete | README and guide now describe autonomous/default behavior, no-GT layout, all modes, loop stages, graph optimization, outputs, KPI formulas/availability, and pedagogical limits |
+| Expanded documentation | Complete | the demo README and guide now describe autonomous/default behavior, no-GT layout, all modes, loop stages, graph optimization, outputs, KPI formulas/availability, and pedagogical limits |
 
 ## Documentation evidence
 
-- `README.md` contains the exact `## KPIs` section and distinguishes live CLI,
+- `RGBD_SLAM_DEMO.md` contains the exact `## KPIs` section and distinguishes live CLI,
   per-frame `telemetry.csv`, and aggregate `output/run_summary.json` coverage.
 - Every JSON metric emitted by `build_run_summary()` is documented, including
   formulas, zero/null behavior, GT availability, and interpretation limits.

@@ -246,7 +246,7 @@ accumulated map is empty, and an interrupted worker may not reach pose-graph
 serialization. The NPZ arrays are positions, not full poses. The GT array can be
 empty and has no frame-index sidecar.
 
-The README's `## KPIs` section is the authoritative metric reference. Key
+`RGBD_SLAM_DEMO.md`'s `## KPIs` section is the authoritative metric reference. Key
 interpretation rules are:
 
 - `processing_hz` and JSON compute throughput invert worker compute time; they
@@ -258,8 +258,9 @@ interpretation rules are:
 - Autonomous acceptance rate and mean match/PnP/ICP quality summarize only loops
   that passed every threshold; they do not characterize rejected candidates or
   prove that accepted loops are correct.
-- ATE compares translations directly in the first-camera frame without fitting
-  an additional trajectory alignment.
+- ATE and final-position error align estimated poses with GT at their first
+  shared frame using SE(3), for evaluation only. There is no scale fitting,
+  and graph/map/displayed/stored trajectories are not changed.
 - Accuracy is omitted without GT. In autonomous mode GT never participates in
   estimation; in GT-assisted mode optimized accuracy is inherently circular.
 - The CLI prints a high-value subset; `run_summary.json` has all aggregate fields,

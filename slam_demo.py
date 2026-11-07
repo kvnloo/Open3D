@@ -535,7 +535,11 @@ def accuracy_kpis(poses, ground_truth):
     indices = [index for index in sorted(ground_truth) if index < len(poses)]
     if not indices:
         return None
-    absolute = [np.linalg.norm(poses[index][:3, 3] - ground_truth[index][:3, 3])
+    # Compare in the GT frame at the earliest shared observation.
+    first = indices[0]
+    gt_from_est = (ground_truth[first] @ np.linalg.inv(poses[first]))
+    absolute = [np.linalg.norm((gt_from_est @ poses[index])[:3, 3]
+                               - ground_truth[index][:3, 3])
                 for index in indices]
     relative_translation = []
     relative_rotation = []
