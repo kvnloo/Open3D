@@ -5,3 +5,4 @@ scipy==1.17.0; python_version >= "3.14"
 tensorboard==2.19.0
 oauthlib==3.2.2
 certifi
+matplotlib>=3.8.0
