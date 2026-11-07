@@ -44,6 +44,12 @@ public:
                  const std::vector<Eigen::Vector3i> &triangles)
         : MeshBase(Geometry::GeometryType::TriangleMesh, vertices),
           triangles_(triangles) {}
+    /// \brief Copy every base and derived mesh attribute.
+    ///
+    /// The default copy constructor retains MeshBase vertex normals and
+    /// colors as well as TriangleMesh's triangle-specific attributes.
+    TriangleMesh(const TriangleMesh &) = default;
+    TriangleMesh &operator=(const TriangleMesh &) = default;
     ~TriangleMesh() override {}
 
 public:
@@ -56,6 +62,15 @@ public:
 public:
     TriangleMesh &operator+=(const TriangleMesh &mesh);
     TriangleMesh operator+(const TriangleMesh &mesh) const;
+    /// \brief Compare vertex and oriented triangle geometry, not indices.
+    ///
+    /// Vertex and triangle order and cyclic face rotations are ignored.
+    /// Coincident vertices and repeated faces retain their multiplicity,
+    /// but coincident vertex IDs are indistinguishable. Reversing face winding
+    /// changes equality. Positions use Eigen's relative isApprox tolerance
+    /// after deterministic sorting; non-finite positions are unequal.
+    /// Normals, colors, UVs, textures, and materials are excluded.
+    bool operator==(const TriangleMesh &mesh) const;
 
     /// Returns `true` if the mesh contains triangles.
     bool HasTriangles() const {

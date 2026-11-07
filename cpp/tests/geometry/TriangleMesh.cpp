@@ -79,6 +79,127 @@ TEST(TriangleMesh, Constructor) {
     EXPECT_FALSE(tm.HasTriangleNormals());
 }
 
+TEST(TriangleMesh, CopyPreservesMeshBaseAttributes) {
+    geometry::TriangleMesh mesh({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}},
+                                {{0, 1, 2}});
+    mesh.vertex_normals_ = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+    mesh.vertex_colors_ = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    mesh.triangle_normals_ = {{0, 0, 1}};
+    mesh.triangle_uvs_ = {{0, 0}, {1, 0}, {0, 1}};
+    mesh.adjacency_list_ = {{1, 2}, {0, 2}, {0, 1}};
+
+    // A copy must retain all three MeshBase arrays and derived attributes.
+    geometry::TriangleMesh copied(mesh);
+    EXPECT_EQ(3u, copied.vertices_.size());
+    EXPECT_EQ(3u, copied.vertex_normals_.size());
+    EXPECT_EQ(3u, copied.vertex_colors_.size());
+    EXPECT_EQ(1u, copied.triangles_.size());
+    EXPECT_EQ(3u, copied.triangle_uvs_.size());
+    ExpectMeshEQ(mesh, copied);
+    EXPECT_EQ(mesh.adjacency_list_, copied.adjacency_list_);
+
+    geometry::TriangleMesh assigned;
+    assigned = mesh;
+    ExpectMeshEQ(mesh, assigned);
+
+    // A copy owns independent storage for normals and colors.
+    mesh.vertex_normals_[0] = {1, 0, 0};
+    mesh.vertex_colors_[0] = {0, 0, 0};
+    EXPECT_EQ(Eigen::Vector3d(0, 0, 1), copied.vertex_normals_[0]);
+    EXPECT_EQ(Eigen::Vector3d(1, 0, 0), copied.vertex_colors_[0]);
+}
+
+TEST(TriangleMesh, EqualityUsesOrientedGeometry) {
+    geometry::TriangleMesh mesh({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}},
+                                {{0, 1, 2}});
+    geometry::TriangleMesh same(mesh);
+    EXPECT_TRUE(mesh == same);
+
+    // Equality compares oriented geometry, not appearance.
+    same.vertex_colors_ = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    EXPECT_TRUE(mesh == same);
+
+    same.triangles_[0] = {0, 2, 1};
+    EXPECT_FALSE(mesh == same);
+    same.triangles_[0] = {0, 1, 2};
+    same.vertices_[1] = {2, 0, 0};
+    EXPECT_FALSE(mesh == same);
+}
+
+TEST(TriangleMesh, EqualityIsIndependentOfVertexAndFaceOrder) {
+    geometry::TriangleMesh mesh(
+            {{0, 0, 0}, {2, 0, 0}, {0, 3, 0}, {0, 0, 4}},
+            {{0, 1, 2}, {0, 2, 3}});
+    // Old -> new vertex IDs: 0->3, 1->2, 2->0, 3->1. Reverse
+    // face order and rotate the first face without changing winding.
+    geometry::TriangleMesh reordered(
+            {{0, 3, 0}, {0, 0, 4}, {2, 0, 0}, {0, 0, 0}},
+            {{3, 0, 1}, {2, 0, 3}});
+    EXPECT_TRUE(mesh == reordered);
+    EXPECT_TRUE(reordered == mesh);
+}
+
+TEST(TriangleMesh, EqualityCountsDuplicatesAndPreservesWinding) {
+    geometry::TriangleMesh mesh(
+            {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 0}},
+            {{0, 1, 2}, {3, 1, 2}});
+    geometry::TriangleMesh reordered(
+            {{0, 0, 0}, {0, 1, 0}, {1, 0, 0}, {0, 0, 0}},
+            {{3, 2, 1}, {0, 2, 1}});
+    EXPECT_TRUE(mesh == reordered);
+
+    // The geometric contract counts duplicate positions but does not
+    // distinguish identical coincident vertex IDs in a face.
+    reordered.triangles_[0] = {0, 2, 1};
+    EXPECT_TRUE(mesh == reordered);
+    reordered.triangles_[1] = {0, 1, 2};
+    EXPECT_FALSE(mesh == reordered);
+    reordered.triangles_[1] = {0, 2, 1};
+    reordered.vertices_.pop_back();
+    EXPECT_FALSE(mesh == reordered);
+}
+
+TEST(TriangleMesh, EqualityUsesRelativePositionTolerance) {
+    geometry::TriangleMesh mesh({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}},
+                                {{0, 1, 2}});
+    geometry::TriangleMesh near(mesh);
+    near.vertices_[1].x() = 1.0 + 1e-13;
+    EXPECT_TRUE(mesh == near);
+    near.vertices_[1].x() = 1.0 + 1e-6;
+    EXPECT_FALSE(mesh == near);
+    near.vertices_[1].x() = 1.0;
+    near.vertices_[0].z() = 1e-13;
+    EXPECT_FALSE(mesh == near);
+}
+
+TEST(TriangleMesh, EqualityIgnoresAppearanceAttributes) {
+    geometry::TriangleMesh mesh({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}},
+                                {{0, 1, 2}});
+    geometry::TriangleMesh appearance(mesh);
+    appearance.vertex_colors_ = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    appearance.vertex_normals_ = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+    appearance.triangle_normals_ = {{0, 0, 1}};
+    appearance.triangle_uvs_ = {{0, 0}, {1, 0}, {0, 1}};
+    EXPECT_TRUE(mesh == appearance);
+    EXPECT_TRUE(appearance == mesh);
+}
+
+TEST(TriangleMesh, EqualityRotatesFacesWithCoincidentCorners) {
+    geometry::TriangleMesh mesh({{0, 0, 0}, {0, 0, 0}, {1, 0, 0}},
+                                {{0, 1, 2}});
+    geometry::TriangleMesh rotated(mesh);
+    rotated.triangles_[0] = {1, 2, 0};
+    EXPECT_TRUE(mesh == rotated);
+    EXPECT_TRUE(rotated == mesh);
+}
+
+TEST(TriangleMesh, EqualityRejectsInvalidFaceIndices) {
+    geometry::TriangleMesh mesh({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}},
+                                {{0, 1, 3}});
+    // An invalid index must never be dereferenced during equality.
+    EXPECT_FALSE(mesh == mesh);
+}
+
 TEST(TriangleMesh, DISABLED_MemberData) { NotImplemented(); }
 
 TEST(TriangleMesh, Clear) {

@@ -57,6 +57,12 @@ void pybind_trianglemesh_definitions(py::module &m) {
                  })
             .def(py::self + py::self)
             .def(py::self += py::self)
+            .def(py::self == py::self,
+                 "Compare vertex coordinates and oriented triangle geometry "
+                 "independent of vertex and face order. Duplicate vertices "
+                 "count, cyclic face rotations compare equal, and reversed "
+                 "winding does not. Positions use relative tolerance; "
+                 "normals, colors, UVs, and materials are ignored.")
             .def("compute_triangle_normals",
                  &TriangleMesh::ComputeTriangleNormals,
                  "Function to compute triangle normals, usually called before "
