@@ -1,13 +1,15 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
 #include "open3d/t/geometry/kernel/MinimumOBB.h"
 
 #include <Eigen/src/Core/Matrix.h>
+
+#include <cassert>
 
 #include "open3d/core/EigenConverter.h"
 #include "open3d/core/TensorCheck.h"

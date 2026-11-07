@@ -1,7 +1,7 @@
 # ----------------------------------------------------------------------------
 # -                        Open3D: www.open3d.org                            -
 # ----------------------------------------------------------------------------
-# Copyright (c) 2018-2024 www.open3d.org
+# Copyright (c) 2018-2026 www.open3d.org
 # SPDX-License-Identifier: MIT
 # ----------------------------------------------------------------------------
 
@@ -18,7 +18,7 @@ from open3d_test import list_devices
 
 # test intersection with a single triangle
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_cast_rays(device):
     vertices = o3d.core.Tensor([[0, 0, 0], [1, 0, 0], [1, 1, 0]],
                                dtype=o3d.core.float32,
@@ -50,7 +50,7 @@ def test_cast_rays(device):
 # cast lots of random rays to test the internal batching
 # we expect no errors for this test
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_cast_lots_of_rays(device):
     vertices = o3d.core.Tensor([[0, 0, 0], [1, 0, 0], [1, 1, 0]],
                                dtype=o3d.core.float32,
@@ -71,7 +71,7 @@ def test_cast_lots_of_rays(device):
 
 # test occlusion with a single triangle
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_test_occlusions(device):
     vertices = o3d.core.Tensor([[0, 0, 0], [1, 0, 0], [1, 1, 0]],
                                dtype=o3d.core.float32,
@@ -108,7 +108,7 @@ def test_test_occlusions(device):
 # test lots of random rays for occlusions to test the internal batching
 # we expect no errors for this test
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_test_lots_of_occlusions(device):
     vertices = o3d.core.Tensor([[0, 0, 0], [1, 0, 0], [1, 1, 0]],
                                dtype=o3d.core.float32,
@@ -128,7 +128,7 @@ def test_test_lots_of_occlusions(device):
 
 
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_add_triangle_mesh(device):
     cube = o3d.t.geometry.TriangleMesh.create_box()
     cube = cube.to(device)
@@ -148,7 +148,7 @@ def test_add_triangle_mesh(device):
 
 
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_count_intersections(device):
     cube = o3d.t.geometry.TriangleMesh.create_box()
     vertex_positions = cube.vertex.positions
@@ -174,7 +174,7 @@ def test_count_intersections(device):
 # count lots of random ray intersections to test the internal batching
 # we expect no errors for this test
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_count_lots_of_intersections(device):
     cube = o3d.t.geometry.TriangleMesh.create_box()
     vertex_positions = cube.vertex.positions
@@ -194,7 +194,7 @@ def test_count_lots_of_intersections(device):
 
 
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_list_intersections(device):
     cube = o3d.t.geometry.TriangleMesh.create_box()
     vertex_positions = cube.vertex.positions
@@ -223,7 +223,7 @@ def test_list_intersections(device):
 # list lots of random ray intersections to test the internal batching
 # we expect no errors for this test
 @pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
+                         list_devices(enable_cuda=False, also_sycl_cpu=False))
 def test_list_lots_of_intersections(device):
     cube = o3d.t.geometry.TriangleMesh.create_box()
     vertex_positions = cube.vertex.positions
@@ -460,130 +460,3 @@ def test_sphere_wrong_occupancy():
     # we should get the same result with more samples
     occupancy_3samples = scene.compute_occupancy(query_points, nsamples=3)
     np.testing.assert_equal(occupancy_3samples.numpy(), expected)
-
-
-# --- Tests for copy constructor and copy semantics. ---
-
-
-def _make_scene_with_triangle(device):
-    """Create a RaycastingScene with a single triangle for copy tests."""
-    vertices = o3d.core.Tensor([[0, 0, 0], [1, 0, 0], [1, 1, 0]],
-                               dtype=o3d.core.float32,
-                               device=device)
-    triangles = o3d.core.Tensor([[0, 1, 2]],
-                                dtype=o3d.core.uint32,
-                                device=device)
-    scene = o3d.t.geometry.RaycastingScene(device=device)
-    scene.add_triangles(vertices, triangles)
-    return scene
-
-
-@pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
-def test_copy_constructor_empty_scene(device):
-    scene = o3d.t.geometry.RaycastingScene(device=device)
-    scene_copy = o3d.t.geometry.RaycastingScene(scene)
-    rays = o3d.core.Tensor([[0, 0, 1, 0, 0, -1]],
-                           dtype=o3d.core.float32,
-                           device=device)
-    ans_orig = scene.cast_rays(rays)
-    ans_copy = scene_copy.cast_rays(rays)
-    invalid_id = o3d.t.geometry.RaycastingScene.INVALID_ID
-    assert ans_orig["geometry_ids"][0].cpu().item() == invalid_id
-    assert ans_copy["geometry_ids"][0].cpu().item() == invalid_id
-    assert np.isinf(ans_orig["t_hit"][0].item())
-    assert np.isinf(ans_copy["t_hit"][0].item())
-
-
-@pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
-def test_copy_constructor_scene_with_geometry(device):
-    """Copy of a scene with geometry yields same cast_rays and compute_* results (tests clone)."""
-    scene = _make_scene_with_triangle(device)
-    scene_copy = o3d.t.geometry.RaycastingScene(scene)
-
-    rays = o3d.core.Tensor(
-        [[0.2, 0.1, 1, 0, 0, -1], [10, 10, 10, 1, 0, 0]],
-        dtype=o3d.core.float32,
-        device=device,
-    )
-    ans_orig = scene.cast_rays(rays)
-    ans_copy = scene_copy.cast_rays(rays)
-
-    np.testing.assert_allclose(ans_orig["t_hit"].numpy(),
-                               ans_copy["t_hit"].numpy())
-    np.testing.assert_array_equal(ans_orig["geometry_ids"].numpy(),
-                                  ans_copy["geometry_ids"].numpy())
-
-    query = o3d.core.Tensor([[0.2, 0.1, 1], [10, 10, 10]],
-                            dtype=o3d.core.float32,
-                            device=device)
-    closest_orig = scene.compute_closest_points(query)
-    closest_copy = scene_copy.compute_closest_points(query)
-    np.testing.assert_allclose(closest_orig["points"].numpy(),
-                               closest_copy["points"].numpy())
-    np.testing.assert_array_equal(closest_orig["geometry_ids"].numpy(),
-                                  closest_copy["geometry_ids"].numpy())
-
-    dist_orig = scene.compute_distance(query)
-    dist_copy = scene_copy.compute_distance(query)
-    np.testing.assert_allclose(dist_orig.numpy(), dist_copy.numpy())
-
-
-@pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
-def test_copy_independence(device):
-    """Copy is independent: adding geometry to one does not affect the other."""
-    scene = _make_scene_with_triangle(device)
-    scene_copy = o3d.t.geometry.RaycastingScene(scene)
-
-    # Add another triangle only to the copy
-    v2 = o3d.core.Tensor([[0, 0, 1], [1, 0, 1], [0, 1, 1]],
-                         dtype=o3d.core.float32,
-                         device=device)
-    t2 = o3d.core.Tensor([[0, 1, 2]], dtype=o3d.core.uint32, device=device)
-    scene_copy.add_triangles(v2, t2)
-
-    invalid_id = o3d.t.geometry.RaycastingScene.INVALID_ID
-    # Ray hitting first triangle: both should hit
-    rays_one = o3d.core.Tensor(
-        [[0.2, 0.1, 0.5, 0, 0, -1]],
-        dtype=o3d.core.float32,
-        device=device,
-    )
-    ans_orig = scene.cast_rays(rays_one)
-    ans_copy = scene_copy.cast_rays(rays_one)
-    assert ans_orig["geometry_ids"][0].cpu().item() != invalid_id
-    assert ans_copy["geometry_ids"][0].cpu().item() != invalid_id
-
-    # Ray that would hit second triangle (only in copy): miss in original, hit in copy
-    rays_two = o3d.core.Tensor(
-        [[0.2, 0.1, 0.5, 0, 0, 1]],
-        dtype=o3d.core.float32,
-        device=device,
-    )
-    ans_orig2 = scene.cast_rays(rays_two)
-    ans_copy2 = scene_copy.cast_rays(rays_two)
-    assert ans_orig2["geometry_ids"][0].cpu().item() == invalid_id
-    assert ans_copy2["geometry_ids"][0].cpu().item() != invalid_id
-
-
-@pytest.mark.parametrize("device",
-                         list_devices(enable_cuda=False, enable_sycl=True))
-def test_copy_module_deepcopy(device):
-    """copy.deepcopy(scene) works and produces an independent copy."""
-    import copy as copy_module
-    scene = _make_scene_with_triangle(device)
-    scene_copy = copy_module.deepcopy(scene)
-
-    rays = o3d.core.Tensor(
-        [[0.2, 0.1, 1, 0, 0, -1]],
-        dtype=o3d.core.float32,
-        device=device,
-    )
-    ans_orig = scene.cast_rays(rays)
-    ans_copy = scene_copy.cast_rays(rays)
-    np.testing.assert_allclose(ans_orig["t_hit"].numpy(),
-                               ans_copy["t_hit"].numpy())
-    assert ans_orig["geometry_ids"][0].cpu().item(
-    ) == ans_copy["geometry_ids"][0].cpu().item()

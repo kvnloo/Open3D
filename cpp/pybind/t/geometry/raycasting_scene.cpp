@@ -1,12 +1,12 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
 #include "open3d/t/geometry/RaycastingScene.h"
-#include "pybind/core/tensor_type_caster.h"
+#include "pybind/core/type_caster.h"
 #include "pybind/t/geometry/geometry.h"
 
 namespace open3d {
@@ -68,12 +68,20 @@ Args:
 )doc");
 
     raycasting_scene.def(py::init<const RaycastingScene&>(), "other"_a, R"doc(
-Create a RaycastingScene as a copy of another scene (copy constructor).
+Create a deep copy of another scene, including its geometry and build settings.
 
 Args:
     other (open3d.t.geometry.RaycastingScene): The scene to copy.
+
+Example:
+    >>> clone = o3d.t.geometry.RaycastingScene(scene)
 )doc");
 
+    // Both Python copy protocols produce independent native Embree scenes.
+    raycasting_scene.def("__copy__",
+                         [](const RaycastingScene& self) {
+                             return RaycastingScene(self);
+                         });
     raycasting_scene.def("__deepcopy__",
                          [](const RaycastingScene& self, py::dict /* memo */) {
                              return RaycastingScene(self);

@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -35,18 +35,18 @@ public:
 
     ~RaycastingScene();
 
-    /// \brief Copy constructor.
-    /// Creates a new object as a copy of an existing one.
+    /// \brief Deep-copy a RaycastingScene, including its geometry buffers.
+    /// The copy has its own Embree scene and preserves the build thread count.
     RaycastingScene(const RaycastingScene &other);
 
-    /// \brief Copy assignment operator.
-    /// Assigns the contents of an existing object to this object.
+    /// \brief Replace this scene with a deep copy of another scene.
+    /// Existing Embree resources are released when the assignment succeeds.
     RaycastingScene &operator=(const RaycastingScene &other);
 
-    /// \brief Move constructor.
+    /// \brief Transfer the native scene and device without copying geometry.
     RaycastingScene(RaycastingScene &&other) noexcept;
 
-    /// \brief Move assignment operator.
+    /// \brief Transfer ownership, releasing the old scene and device.
     RaycastingScene &operator=(RaycastingScene &&other) noexcept;
 
     /// \brief Add a triangle mesh to the scene.

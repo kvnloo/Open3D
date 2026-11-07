@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -42,6 +42,9 @@ std::shared_ptr<messages::Status> UnpackStatusFromReply(
             status_obj_handle.get().convert(status);
             ok = true;
         }
+    } catch (const msgpack::type_error& e) {
+        LogDebug("Failed to parse message: {}", e.what());
+        offset = msg.size();
     } catch (std::exception& e) {
         LogDebug("Failed to parse message: {}", e.what());
         offset = msg.size();

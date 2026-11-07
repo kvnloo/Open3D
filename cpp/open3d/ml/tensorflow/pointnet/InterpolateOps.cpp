@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 /* Furthest point sampling
@@ -69,7 +69,6 @@ REGISTER_OP("Open3DThreeInterpolateGrad")
             ::tensorflow::shape_inference::ShapeHandle output =
                     c->MakeShape({c->Dim(dims1, 0), c->Dim(dims1, 1), M});
             c->set_output(0, output);
-            c->set_output(1, output);
             return absl::OkStatus();
         })
         .Doc(R"doc( TODO )doc");

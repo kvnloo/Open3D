@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -410,9 +410,11 @@ void Open3DScene::UpdateMaterial(const MaterialRecord& mat) {
 
 void Open3DScene::UpdateModelMaterial(const std::string& name,
                                       const TriangleMeshModel& model) {
+    // Re-apply per-submesh materials in place. This avoids removing and
+    // re-adding the geometry, which would reset the model's transform and
+    // visibility state.
     auto scene = renderer_.GetScene(scene_);
-    scene->RemoveGeometry(name);
-    scene->AddGeometry(name, model);
+    scene->OverrideMaterial(name, model);
 }
 
 std::vector<std::string> Open3DScene::GetGeometries() {
@@ -436,30 +438,25 @@ void Open3DScene::SetLOD(LOD lod) {
 
 void Open3DScene::SetGeometryToLOD(const GeometryData& data, LOD lod) {
     auto scene = renderer_.GetScene(scene_);
-    scene->ShowGeometry(data.name, false);
-    if (!data.fast_name.empty()) {
-        scene->ShowGeometry(data.fast_name, false);
-    }
-    if (!data.low_name.empty()) {
-        scene->ShowGeometry(data.low_name, false);
-    }
-
+    std::string visible_name;
     if (data.visible) {
         if (lod == LOD::HIGH_DETAIL) {
-            scene->ShowGeometry(data.name, true);
+            visible_name = data.name;
+        } else if (use_low_quality_if_available_ && !data.low_name.empty()) {
+            visible_name = data.low_name;
+        } else if (!data.fast_name.empty()) {
+            visible_name = data.fast_name;
         } else {
-            std::string id;
-            if (use_low_quality_if_available_) {
-                id = data.low_name;
-            }
-            if (id.empty()) {
-                id = data.fast_name;
-            }
-            if (id.empty()) {
-                id = data.name;
-            }
-            scene->ShowGeometry(id, true);
+            visible_name = data.name;
         }
+    }
+
+    scene->ShowGeometry(data.name, visible_name == data.name);
+    if (!data.fast_name.empty()) {
+        scene->ShowGeometry(data.fast_name, visible_name == data.fast_name);
+    }
+    if (!data.low_name.empty()) {
+        scene->ShowGeometry(data.low_name, visible_name == data.low_name);
     }
 }
 

@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 // -                        Open3D: www.open3d.org                            -
 // ----------------------------------------------------------------------------
-// Copyright (c) 2018-2024 www.open3d.org
+// Copyright (c) 2018-2026 www.open3d.org
 // SPDX-License-Identifier: MIT
 // ----------------------------------------------------------------------------
 
@@ -19,8 +19,11 @@
 #include <tbb/parallel_for.h>
 
 #include <Eigen/Core>
+#include <cassert>
 #include <cstring>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 #include <unsupported/Eigen/AlignedVector3>
 #include <vector>
 
@@ -78,9 +81,12 @@ void CountIntersectionsFunc(const RTCFilterFunctionNArguments* args) {
         unsigned int ray_id = ray.id;
         GeomPrimID gpID = {hit.geomID, hit.primID, ray.tfar};
         auto& prev_gpIDtfar = previous_geom_prim_ID_tfar[ray_id];
+
+        // Count distinct surface hits. SYCL refreshes tfar reliably, but not
+        // primID for successive candidates; geomID also separates geometry
+        // hits while deduplicating adjacent triangles sharing the same tfar.
         if (prev_gpIDtfar.geomID != hit.geomID ||
-            (prev_gpIDtfar.primID != hit.primID &&
-             prev_gpIDtfar.ray_tfar != ray.tfar)) {
+            prev_gpIDtfar.ray_tfar != ray.tfar) {
             ++(intersections[ray_id]);
             previous_geom_prim_ID_tfar[ray_id] = gpID;
         }
@@ -144,8 +150,7 @@ void ListIntersectionsFunc(const RTCFilterFunctionNArguments* args) {
         GeomPrimID gpID = {hit.geomID, hit.primID, ray.tfar};
         auto& prev_gpIDtfar = previous_geom_prim_ID_tfar[ray_id];
         if (prev_gpIDtfar.geomID != hit.geomID ||
-            (prev_gpIDtfar.primID != hit.primID &&
-             prev_gpIDtfar.ray_tfar != ray.tfar)) {
+            prev_gpIDtfar.ray_tfar != ray.tfar) {
             size_t idx = cumsum[ray_id] + track_intersections[ray_id];
             ray_ids[idx] = ray_id;
             geometry_ids[idx] = hit.geomID;
@@ -356,21 +361,68 @@ namespace t {
 namespace geometry {
 
 struct RaycastingScene::Impl {
-    RTCScene scene_;
-    bool scene_committed_;  // true if the scene has been committed.
-    RTCDevice device_;
-    // Vector for storing some information about the added geometry.
+    RTCScene scene_ = nullptr;
+    bool scene_committed_ = false;  // true if the scene has been committed.
+    RTCDevice device_ = nullptr;
+    // Geometry buffers belong to the scene. Sizes are used to deep-copy them.
     std::vector<GeometryPtr> geometry_ptrs_;
-    // (num_vertices, num_triangles) per geometry, for copy support.
     std::vector<std::pair<size_t, size_t>> geometry_sizes_;
     core::Device tensor_device_;  // cpu or sycl
+    int64_t nthreads_ = 0;
+    bool devprop_join_commit = false;
 
-    bool devprop_join_commit;
+    // The implementation owns the scene and device, including on assignment.
+    // Release the scene first because it retains geometry from the device.
+    virtual ~Impl() {
+        if (scene_) {
+            rtcReleaseScene(scene_);
+        }
+        if (device_) {
+            rtcReleaseDevice(device_);
+        }
+    }
 
-    virtual ~Impl() = default;
+    // Rebuild Embree buffers on a fresh device, not by aliasing the source.
+    // Reusing the constructor preserves CPU nthreads and the SYCL backend.
+    std::unique_ptr<Impl> Clone() const {
+        RaycastingScene scene_copy(nthreads_, tensor_device_);
+        std::unique_ptr<Impl> copy = std::move(scene_copy.impl_);
+        copy->geometry_sizes_ = geometry_sizes_;
 
-    /// Returns a deep copy of this implementation (new device and scene).
-    virtual std::unique_ptr<Impl> Clone() const = 0;
+        for (size_t i = 0; i < geometry_ptrs_.size(); ++i) {
+            const size_t num_vertices = geometry_sizes_[i].first;
+            const size_t num_triangles = geometry_sizes_[i].second;
+            RTCGeometry src = rtcGetGeometry(scene_, static_cast<unsigned int>(i));
+
+            const void* src_vertices =
+                    rtcGetGeometryBufferData(src, RTC_BUFFER_TYPE_VERTEX, 0);
+            const void* src_indices =
+                    rtcGetGeometryBufferData(src, RTC_BUFFER_TYPE_INDEX, 0);
+
+            // Release a partially copied geometry even if a copy operation fails.
+            std::unique_ptr<std::remove_pointer_t<RTCGeometry>,
+                            decltype(&rtcReleaseGeometry)>
+                    geom(rtcNewGeometry(copy->device_, RTC_GEOMETRY_TYPE_TRIANGLE),
+                         &rtcReleaseGeometry);
+            void* vertices = rtcSetNewGeometryBuffer(
+                    geom.get(), RTC_BUFFER_TYPE_VERTEX, 0, RTC_FORMAT_FLOAT3,
+                    3 * sizeof(float), num_vertices);
+            void* indices = rtcSetNewGeometryBuffer(
+                    geom.get(), RTC_BUFFER_TYPE_INDEX, 0, RTC_FORMAT_UINT3,
+                    3 * sizeof(uint32_t), num_triangles);
+
+            std::memcpy(vertices, src_vertices, 3 * sizeof(float) * num_vertices);
+            std::memcpy(indices, src_indices,
+                        3 * sizeof(uint32_t) * num_triangles);
+            rtcSetGeometryEnableFilterFunctionFromArguments(geom.get(), true);
+            rtcCommitGeometry(geom.get());
+            rtcAttachGeometry(copy->scene_, geom.get());
+
+            copy->geometry_ptrs_.push_back(
+                    {RTC_GEOMETRY_TYPE_TRIANGLE, vertices, indices});
+        }
+        return copy;
+    }
 
     void CommitScene() {
         if (!scene_committed_) {
@@ -823,59 +875,6 @@ struct RaycastingScene::SYCLImpl : public RaycastingScene::Impl {
     void CopyArray(int* src, uint32_t* dst, size_t num_elements) override {
         queue_.memcpy(dst, src, num_elements * sizeof(uint32_t)).wait();
     }
-
-    std::unique_ptr<Impl> Clone() const override {
-        auto copy = std::make_unique<SYCLImpl>();
-        copy->InitializeDevice();
-        copy->tensor_device_ = tensor_device_;
-        rtcSetDeviceErrorFunction(copy->device_, ErrorFunction, NULL);
-        copy->scene_ = rtcNewScene(copy->device_);
-        rtcSetSceneFlags(copy->scene_,
-                         RTC_SCENE_FLAG_ROBUST |
-                                 RTC_SCENE_FLAG_FILTER_FUNCTION_IN_ARGUMENTS);
-        copy->devprop_join_commit = rtcGetDeviceProperty(
-                copy->device_, RTC_DEVICE_PROPERTY_JOIN_COMMIT_SUPPORTED);
-        copy->scene_committed_ = false;
-        copy->geometry_sizes_ = geometry_sizes_;
-
-        SYCLImpl* dst = copy.get();
-
-        for (size_t geom_id = 0; geom_id < geometry_ptrs_.size(); ++geom_id) {
-            const size_t num_vertices = geometry_sizes_[geom_id].first;
-            const size_t num_triangles = geometry_sizes_[geom_id].second;
-            const size_t vb_bytes = 3 * sizeof(float) * num_vertices;
-            const size_t ib_bytes = 3 * sizeof(uint32_t) * num_triangles;
-
-            RTCGeometry src_geom = rtcGetGeometry(scene_, geom_id);
-            const void* vb_src = rtcGetGeometryBufferData(
-                    src_geom, RTC_BUFFER_TYPE_VERTEX, 0);
-            const void* ib_src = rtcGetGeometryBufferData(
-                    src_geom, RTC_BUFFER_TYPE_INDEX, 0);
-
-            RTCGeometry geom =
-                    rtcNewGeometry(dst->device_, RTC_GEOMETRY_TYPE_TRIANGLE);
-            void* vertex_buffer = rtcSetNewGeometryBuffer(
-                    geom, RTC_BUFFER_TYPE_VERTEX, 0, RTC_FORMAT_FLOAT3,
-                    3 * sizeof(float), num_vertices);
-            void* index_buffer = rtcSetNewGeometryBuffer(
-                    geom, RTC_BUFFER_TYPE_INDEX, 0, RTC_FORMAT_UINT3,
-                    3 * sizeof(uint32_t), num_triangles);
-
-            std::memcpy(vertex_buffer, vb_src, vb_bytes);
-            std::memcpy(index_buffer, ib_src, ib_bytes);
-
-            rtcSetGeometryEnableFilterFunctionFromArguments(geom, true);
-            rtcCommitGeometry(geom);
-            rtcAttachGeometry(dst->scene_, geom);
-            rtcReleaseGeometry(geom);
-
-            GeometryPtr geometry_ptr = {RTC_GEOMETRY_TYPE_TRIANGLE,
-                                        static_cast<const void*>(vertex_buffer),
-                                        static_cast<const void*>(index_buffer)};
-            dst->geometry_ptrs_.push_back(geometry_ptr);
-        }
-        return copy;
-    }
 };
 #endif
 
@@ -1250,61 +1249,6 @@ struct RaycastingScene::CPUImpl : public RaycastingScene::Impl {
     void CopyArray(int* src, uint32_t* dst, size_t num_elements) override {
         std::copy(src, src + num_elements, dst);
     }
-
-    std::unique_ptr<Impl> Clone() const override {
-        auto copy = std::make_unique<CPUImpl>();
-        copy->device_ = rtcNewDevice(NULL);
-        rtcSetDeviceErrorFunction(copy->device_, ErrorFunction, NULL);
-        copy->scene_ = rtcNewScene(copy->device_);
-        rtcSetSceneFlags(copy->scene_,
-                         RTC_SCENE_FLAG_ROBUST |
-                                 RTC_SCENE_FLAG_FILTER_FUNCTION_IN_ARGUMENTS);
-        copy->devprop_join_commit = rtcGetDeviceProperty(
-                copy->device_, RTC_DEVICE_PROPERTY_JOIN_COMMIT_SUPPORTED);
-        copy->scene_committed_ = false;
-        copy->tensor_device_ = tensor_device_;
-        copy->geometry_sizes_ = geometry_sizes_;
-
-        for (size_t geom_id = 0; geom_id < geometry_ptrs_.size(); ++geom_id) {
-            const size_t num_vertices = geometry_sizes_[geom_id].first;
-            const size_t num_triangles = geometry_sizes_[geom_id].second;
-
-            RTCGeometry src_geom = rtcGetGeometry(scene_, geom_id);
-            const float* vb_src =
-                    reinterpret_cast<const float*>(rtcGetGeometryBufferData(
-                            src_geom, RTC_BUFFER_TYPE_VERTEX, 0));
-            const uint32_t* ib_src =
-                    reinterpret_cast<const uint32_t*>(rtcGetGeometryBufferData(
-                            src_geom, RTC_BUFFER_TYPE_INDEX, 0));
-
-            RTCGeometry geom =
-                    rtcNewGeometry(copy->device_, RTC_GEOMETRY_TYPE_TRIANGLE);
-            float* vertex_buffer =
-                    reinterpret_cast<float*>(rtcSetNewGeometryBuffer(
-                            geom, RTC_BUFFER_TYPE_VERTEX, 0, RTC_FORMAT_FLOAT3,
-                            3 * sizeof(float), num_vertices));
-            uint32_t* index_buffer =
-                    reinterpret_cast<uint32_t*>(rtcSetNewGeometryBuffer(
-                            geom, RTC_BUFFER_TYPE_INDEX, 0, RTC_FORMAT_UINT3,
-                            3 * sizeof(uint32_t), num_triangles));
-
-            std::memcpy(vertex_buffer, vb_src,
-                        3 * sizeof(float) * num_vertices);
-            std::memcpy(index_buffer, ib_src,
-                        3 * sizeof(uint32_t) * num_triangles);
-
-            rtcSetGeometryEnableFilterFunctionFromArguments(geom, true);
-            rtcCommitGeometry(geom);
-            rtcAttachGeometry(copy->scene_, geom);
-            rtcReleaseGeometry(geom);
-
-            GeometryPtr geometry_ptr = {RTC_GEOMETRY_TYPE_TRIANGLE,
-                                        static_cast<const void*>(vertex_buffer),
-                                        static_cast<const void*>(index_buffer)};
-            copy->geometry_ptrs_.push_back(geometry_ptr);
-        }
-        return copy;
-    }
 };
 
 RaycastingScene::RaycastingScene(int64_t nthreads, const core::Device& device) {
@@ -1340,34 +1284,28 @@ RaycastingScene::RaycastingScene(int64_t nthreads, const core::Device& device) {
             impl_->device_, RTC_DEVICE_PROPERTY_JOIN_COMMIT_SUPPORTED);
 
     impl_->scene_committed_ = false;
+    impl_->tensor_device_ = device;
+    impl_->nthreads_ = nthreads;
 }
 
-RaycastingScene::~RaycastingScene() {
-    if (impl_) {
-        rtcReleaseScene(impl_->scene_);
-        rtcReleaseDevice(impl_->device_);
-    }
-}
+// The unique_ptr and Impl destructor own all native Embree resources.
+RaycastingScene::~RaycastingScene() = default;
 
 RaycastingScene::RaycastingScene(const RaycastingScene& other)
     : impl_(other.impl_->Clone()) {}
 
 RaycastingScene& RaycastingScene::operator=(const RaycastingScene& other) {
     if (this != &other) {
+        // Clone before replacing: failure leaves the old scene usable.
         impl_ = other.impl_->Clone();
     }
     return *this;
 }
 
-RaycastingScene::RaycastingScene(RaycastingScene&& other) noexcept
-    : impl_(std::move(other.impl_)) {}
+RaycastingScene::RaycastingScene(RaycastingScene&& other) noexcept = default;
 
-RaycastingScene& RaycastingScene::operator=(RaycastingScene&& other) noexcept {
-    if (this != &other) {
-        impl_ = std::move(other.impl_);
-    }
-    return *this;
-}
+RaycastingScene& RaycastingScene::operator=(RaycastingScene&& other) noexcept =
+        default;
 
 uint32_t RaycastingScene::AddTriangles(const core::Tensor& vertex_positions,
                                        const core::Tensor& triangle_indices) {
@@ -1436,8 +1374,8 @@ uint32_t RaycastingScene::AddTriangles(const core::Tensor& vertex_positions,
     rtcReleaseGeometry(geom);
 
     GeometryPtr geometry_ptr = {RTC_GEOMETRY_TYPE_TRIANGLE,
-                                static_cast<const void*>(vertex_buffer),
-                                static_cast<const void*>(index_buffer)};
+                                (const void*)vertex_buffer,
+                                (const void*)index_buffer};
     impl_->geometry_ptrs_.push_back(geometry_ptr);
     impl_->geometry_sizes_.push_back({num_vertices, num_triangles});
     return geom_id;
