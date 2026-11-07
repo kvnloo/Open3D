@@ -101,3 +101,79 @@ def test_oriented_bounding_volumes_reject_tiny_projective_coefficient():
     for volume in volumes:
         with pytest.raises(RuntimeError, match="projective"):
             volume.transform(transformation)
+
+_VOLUME_CASES = [
+    pytest.param(o3d.geometry.OrientedBoundingBox, "extent", [2.0, 4.0, 6.0],
+                 id="box"),
+    pytest.param(o3d.geometry.OrientedBoundingEllipsoid, "radii",
+                 [1.0, 2.0, 3.0], id="ellipsoid"),
+]
+
+
+@pytest.mark.parametrize("volume_type, size_attribute, sizes", _VOLUME_CASES)
+def test_oriented_bounding_volumes_accept_near_singular_uniform_scale(
+        volume_type, size_attribute, sizes):
+    """A small positive uniform scale remains a valid affine similarity."""
+    center = np.array([6_000_000.0, -2_000_000.0, 3_000_000.0])
+    transformation = _transform(1e-6 * np.eye(3), [0.5, -2.0, 7.0])
+    transformation[3, 0] = -0.0
+    volume = volume_type(center, np.eye(3), sizes)
+
+    volume.transform(transformation)
+
+    # (6, -2, 3) + (0.5, -2, 7) after the 1e-6 uniform scale.
+    np.testing.assert_allclose(volume.center, [6.5, -4.0, 10.0],
+                               rtol=0, atol=1e-10)
+    np.testing.assert_allclose(volume.R, np.eye(3), rtol=0, atol=1e-10)
+    np.testing.assert_allclose(getattr(volume, size_attribute),
+                               1e-6 * np.asarray(sizes), rtol=1e-9,
+                               atol=1e-15)
+
+
+@pytest.mark.parametrize("volume_type, size_attribute, sizes", _VOLUME_CASES)
+@pytest.mark.parametrize("linear, error", [
+    pytest.param(np.diag([1.0, 1.0, 1e-12]), "general",
+                 id="near-singular-anisotropic"),
+    pytest.param(np.diag([1.0, 1.0, 0.0]), "collapses", id="singular"),
+    pytest.param(np.diag([-1.0, 1.0, 1.0]), "mirrors", id="reflected"),
+    pytest.param(np.diag([2.0, 1.0, 1.0]), "general",
+                 id="non-uniform-scale"),
+])
+def test_oriented_bounding_volumes_reject_invalid_linear_parts(
+        volume_type, size_attribute, sizes, linear, error):
+    """Collapse, reflection, and anisotropy cannot be represented."""
+    center = np.array([1.0, 2.0, 3.0])
+    volume = volume_type(center, np.eye(3), sizes)
+
+    with pytest.raises(RuntimeError, match=error):
+        volume.transform(_transform(linear, [4.0, -2.0, 1.0]))
+
+    np.testing.assert_array_equal(volume.center, center)
+    np.testing.assert_array_equal(volume.R, np.eye(3))
+    np.testing.assert_array_equal(getattr(volume, size_attribute), sizes)
+
+
+@pytest.mark.parametrize("volume_type, size_attribute, sizes", _VOLUME_CASES)
+@pytest.mark.parametrize("column, coefficient", [
+    pytest.param(0, 1e-16, id="tiny-x-perspective"),
+    pytest.param(1, -1e-16, id="tiny-y-perspective"),
+    pytest.param(2, 1e-16, id="tiny-z-perspective"),
+    pytest.param(3, np.nextafter(1.0, np.inf), id="nonunit-w"),
+])
+def test_oriented_bounding_volumes_require_exact_affine_last_row(
+        volume_type, size_attribute, sizes, column, coefficient):
+    """Even sub-tolerance homogeneous-row changes must be rejected."""
+    center = np.array([6_000_000.0, -2_000_000.0, 3_000_000.0])
+    transformation = np.eye(4)
+    transformation[3, column] = coefficient
+    volume = volume_type(center, np.eye(3), sizes)
+
+    if column == 0:
+        projected_x = center[0] / (1.0 + coefficient * center[0])
+        assert 0.003 < center[0] - projected_x < 0.004
+
+    with pytest.raises(RuntimeError, match="projective"):
+        volume.transform(transformation)
+
+    np.testing.assert_array_equal(volume.center, center)
+    np.testing.assert_array_equal(getattr(volume, size_attribute), sizes)

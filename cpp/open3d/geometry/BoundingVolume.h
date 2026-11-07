@@ -71,6 +71,10 @@ public:
     /// and three radii cannot describe. Mirroring throws because it would
     /// leave the rotation matrix improper, and a projective transformation
     /// throws because it is not affine.
+    ///
+    /// The homogeneous last row must equal [0, 0, 0, 1] exactly; no
+    /// coordinate bound is assumed for ignoring small perspective terms.
+    /// Rotation orthogonality uses a separate 1e-5 tolerance.
     virtual OrientedBoundingEllipsoid& Transform(
             const Eigen::Matrix4d& transformation) override;
     virtual OrientedBoundingEllipsoid& Translate(
@@ -196,6 +200,10 @@ public:
     /// extent cannot describe. Mirroring throws because it would leave the
     /// rotation matrix improper, and a projective transformation throws
     /// because it is not affine.
+    ///
+    /// The homogeneous last row must equal [0, 0, 0, 1] exactly; no
+    /// coordinate bound is assumed for ignoring small perspective terms.
+    /// Rotation orthogonality uses a separate 1e-5 tolerance.
     virtual OrientedBoundingBox& Transform(
             const Eigen::Matrix4d& transformation) override;
     virtual OrientedBoundingBox& Translate(const Eigen::Vector3d& translation,
