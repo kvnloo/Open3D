@@ -567,6 +567,34 @@ Example:
     // Buffer I/O for Numpy and DLPack(PyTorch).
     tensor.def("numpy", &core::TensorToPyArray);
 
+    // NumPy calls __array__ to obtain numeric values rather than iterating
+    // scalar Tensor objects. Reuse numpy() to preserve CPU strides and owner.
+    tensor.def(
+            "__array__",
+            [](const Tensor& self, py::object dtype, py::object copy) {
+                py::array array = core::TensorToPyArray(self);
+                bool dtype_copied = false;
+                if (!dtype.is_none()) {
+                    py::array converted =
+                            array.attr("astype")(dtype, "copy"_a = false)
+                                    .cast<py::array>();
+                    dtype_copied = !converted.is(array);
+                    if (!copy.is_none() && !copy.cast<bool>() && dtype_copied) {
+                        throw py::value_error(
+                                "Cannot change Tensor dtype with copy=False.");
+                    }
+                    array = converted;
+                }
+                if (!copy.is_none() && copy.cast<bool>() && !dtype_copied) {
+                    array = array.attr("copy")().cast<py::array>();
+                }
+                return array;
+            },
+            "dtype"_a = py::none(), "copy"_a = py::none(),
+            "Return a NumPy view of a CPU Tensor, copying if requested or "
+            "required by a dtype conversion.");
+
+
     tensor.def_static("from_numpy", [](py::array np_array) {
         return core::PyArrayToTensor(np_array, /*inplace=*/true);
     });
