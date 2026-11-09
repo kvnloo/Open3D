@@ -574,8 +574,8 @@ static bool ReadPCDData(FILE *file,
             }
             for (const auto &field : header.fields) {
                 if (field.name == "_") {
-                continue;
-            }
+                    continue;
+                }
                 if (field.name == "rgb" || field.name == "rgba") {
                     ReadBinaryPCDColorsFromField(
                             map_field_to_attr_ptr["colors"], field,
