@@ -50,7 +50,7 @@ def test_gltf_positions_are_four_byte_aligned(tmp_path, suffix, triangle_count):
     index_bytes = triangle_count * 3 * 2  # uint16 indices
     aligned_offset = ((index_bytes + 3) // 4) * 4
     assert indices["componentType"] == 5123
-    assert index_view["byteOffset"] == 0
+    assert index_view.get("byteOffset", 0) == 0
     assert index_view["byteLength"] == index_bytes
     assert position_view["byteOffset"] == aligned_offset
     assert position_view["byteOffset"] % 4 == 0
