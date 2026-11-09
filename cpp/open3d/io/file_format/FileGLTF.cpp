@@ -560,6 +560,11 @@ bool WriteTriangleMeshToGLTF(const std::string& filename,
     gltf_mesh.primitives.push_back(gltf_primitive);
     model.meshes.push_back(gltf_mesh);
 
+    // glTF bufferView byte offsets must be multiples of four. Pad the index
+    // data without including the padding in its declared bufferView length.
+    while (index_buffer.size() % 4 != 0) {
+        index_buffer.push_back(0);
+    }
     model.bufferViews[0].byteOffset = 0;
     model.bufferViews[1].byteOffset = index_buffer.size();
 
