@@ -591,9 +591,11 @@ Example:
                 return array;
             },
             "dtype"_a = py::none(), "copy"_a = py::none(),
-            "Return a NumPy view of a CPU Tensor, copying if requested or "
-            "required by a dtype conversion.");
+            R"(Expose a CPU Tensor as a NumPy array.
 
+By default, ``numpy.asarray(tensor)`` shares storage with ``tensor``.
+A dtype conversion or ``copy=True`` returns independent storage. A
+dtype conversion with ``copy=False`` raises ValueError.)");
 
     tensor.def_static("from_numpy", [](py::array np_array) {
         return core::PyArrayToTensor(np_array, /*inplace=*/true);
