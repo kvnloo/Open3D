@@ -138,6 +138,10 @@ static bool InitializeHeader(PCDHeader &header) {
     std::unordered_map<std::string, core::Dtype> field_dtype;
 
     for (const auto &field : header.fields) {
+        // PCD uses "_" for padding, not a named point attribute.
+        if (field.name == "_") {
+            continue;
+        }
         if (field.name == "x" || field.name == "y" || field.name == "z" ||
             field.name == "normal_x" || field.name == "normal_y" ||
             field.name == "normal_z" || field.name == "rgb" ||
@@ -541,6 +545,9 @@ static bool ReadPCDData(FILE *file,
             }
             for (size_t i = 0; i < header.fields.size(); ++i) {
                 const auto &field = header.fields[i];
+                if (field.name == "_") {
+                    continue;
+                }
                 if (field.name == "rgb" || field.name == "rgba") {
                     ReadASCIIPCDColorsFromField(
                             map_field_to_attr_ptr["colors"], field,
@@ -566,6 +573,9 @@ static bool ReadPCDData(FILE *file,
                 return false;
             }
             for (const auto &field : header.fields) {
+                if (field.name == "_") {
+                    continue;
+                }
                 if (field.name == "rgb" || field.name == "rgba") {
                     ReadBinaryPCDColorsFromField(
                             map_field_to_attr_ptr["colors"], field,
@@ -620,6 +630,9 @@ static bool ReadPCDData(FILE *file,
             return false;
         }
         for (const auto &field : header.fields) {
+            if (field.name == "_") {
+                continue;
+            }
             const char *base_ptr = buffer.get() + field.offset * header.points;
             double progress =
                     double(base_ptr - buffer.get()) / uncompressed_size;
