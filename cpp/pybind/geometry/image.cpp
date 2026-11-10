@@ -50,7 +50,8 @@ void pybind_image_declarations(py::module &m) {
     py::class_<Image, PyGeometry2D<Image>, std::shared_ptr<Image>, Geometry2D>
             image(m, "Image", py::buffer_protocol(),
                   "The image class stores image with customizable width, "
-                  "height, num of channels and bytes per channel.");
+                  "height, num of channels and bytes per channel. The Python "
+                  "constructor copies strided 2D and 3D buffers.");
     py::class_<RGBDImage, PyGeometry2D<RGBDImage>, std::shared_ptr<RGBDImage>,
                Geometry2D>
             rgbd_image(m, "RGBDImage",
@@ -68,6 +69,10 @@ void pybind_image_definitions(py::module &m) {
     image.def(py::init([](py::buffer b) {
              py::buffer_info info = b.request();
              int width, height, num_of_channels = 0, bytes_per_channel;
+             if (info.ndim != 2 && info.ndim != 3) {
+                 throw std::runtime_error(
+                         "Image can only be initialized from a 2D or 3D buffer.");
+             }
              if (info.format == py::format_descriptor<uint8_t>::format() ||
                  info.format == py::format_descriptor<int8_t>::format()) {
                  bytes_per_channel = 1;
@@ -83,27 +88,34 @@ void pybind_image_definitions(py::module &m) {
                          "Image can only be initialized from buffer of uint8, "
                          "uint16, or float!");
              }
-             if (info.strides[info.ndim - 1] != bytes_per_channel) {
-                 throw std::runtime_error(
-                         "Image can only be initialized from c-style buffer.");
-             }
-             if (info.ndim == 2) {
-                 num_of_channels = 1;
-             } else if (info.ndim == 3) {
-                 num_of_channels = (int)info.shape[2];
-             }
+             num_of_channels = info.ndim == 2 ? 1 : (int)info.shape[2];
              height = (int)info.shape[0];
              width = (int)info.shape[1];
-             if (info.strides[1] != num_of_channels * bytes_per_channel ||
-                 info.strides[0] !=
-                         width * num_of_channels * bytes_per_channel) {
-                 throw std::runtime_error(
-                         "Image can only be initialized from a contiguous "
-                         "buffer.");
-             }
              auto img = new Image();
              img->Prepare(width, height, num_of_channels, bytes_per_channel);
-             memcpy(img->data_.data(), info.ptr, img->data_.size());
+
+             const auto *src = static_cast<const uint8_t *>(info.ptr);
+             auto *dst = img->data_.data();
+             if (info.strides[info.ndim - 1] == bytes_per_channel &&
+                 info.strides[1] == num_of_channels * bytes_per_channel &&
+                 info.strides[0] ==
+                         width * num_of_channels * bytes_per_channel) {
+                 memcpy(dst, src, img->data_.size());
+             } else {
+                 // Copy logical pixels rather than adjacent bytes for views.
+                 for (int y = 0; y < height; ++y) {
+                     for (int x = 0; x < width; ++x) {
+                         for (int ch = 0; ch < num_of_channels; ++ch) {
+                             const auto *src_pixel =
+                                     src + y * info.strides[0] +
+                                     x * info.strides[1] +
+                                     (info.ndim == 3 ? ch * info.strides[2] : 0);
+                             memcpy(dst, src_pixel, bytes_per_channel);
+                             dst += bytes_per_channel;
+                         }
+                     }
+                 }
+             }
              return img;
          }))
             .def_buffer([](Image &img) -> py::buffer_info {
