@@ -453,7 +453,9 @@ void Execute(const open3d::geometry::PointCloud& pcd,
     {
         Open3DPointStream<Real> pointStream(&pcd);
 
-        if (width > 0.0f) {
+        // An explicit tree depth takes precedence over a requested cell width.
+        // Depth zero selects the width-driven octree resolution instead.
+        if (width > 0.0f && depth == 0) {
             xForm = GetPointXForm<Real, Dim>(pointStream, (Real)width,
                                              (Real)(scale > 0 ? scale : 1.),
                                              depth) *
