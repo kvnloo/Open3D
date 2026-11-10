@@ -1374,7 +1374,10 @@ static PointCloud CreatePointCloudWithNormals(
     auto vertex_list = vertex_map.AsTensor().View({im_size, 3});
     if (!extrinsics.AllClose(Tensor::Eye(4, extrinsics.GetDtype(),
                                          extrinsics.GetDevice()))) {
-        auto cam_to_world = extrinsics.Inverse();
+        // Vertex maps are Float32 and can live on the depth image device.
+        // Match both dtype and device before applying camera extrinsics.
+        auto cam_to_world = extrinsics.Inverse().To(
+                vertex_list.GetDevice(), vertex_list.GetDtype());
         vertex_list = vertex_list
                               .Matmul(cam_to_world.Slice(0, 0, 3, 1)
                                               .Slice(1, 0, 3, 1)
