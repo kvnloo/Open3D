@@ -781,10 +781,16 @@ TEST(TPointCloudIO, ReadPCDWithPaddingFields) {
             "POINTS 2\n"
             "DATA binary\n";
 
-    const std::uint8_t data[] = {0,  0,  128, 63, 0,   0,  0,   64, 0,   0,  64,
-                                 64, 1,  2,   3,  0,   0,  128, 63, 7,   0,  0,
-                                 0,  64, 0,   0,  128, 64, 0,   0,  160, 64, 4,
-                                 5,  6,  0,   0,  0,   64, 9,   0,  0,   0};
+    // Each packed record has 12 position bytes, 3 padding bytes and 4 label
+    // bytes. Keep both records byte-aligned to the declared 19-byte pointsize.
+    const std::uint8_t data[] = {
+            // (1, 2, 3), padding (1, 2, 3), label 7.
+            0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64, 1, 2, 3, 7, 0, 0, 0,
+            // (2, 4, 5), padding (4, 5, 6), label 9.
+            0, 0, 0, 64, 0, 0, 128, 64, 0, 0, 160, 64, 4, 5, 6, 9, 0, 0, 0,
+    };
+    static_assert(sizeof(data) == 2 * (12 + 3 + 4),
+                  "Packed PCD fixture must be two 19-byte records");
     file.write(reinterpret_cast<const char *>(data), sizeof(data));
     file.close();
 
