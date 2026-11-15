@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 
@@ -764,6 +765,44 @@ TEST(TPointCloudIO, Write3DGSSPZAntialiasFlag) {
     EXPECT_NE(log.find("antialiased=true"), std::string::npos);
     EXPECT_NE(log.find("gaussian_splat_antialias"), std::string::npos);
     EXPECT_TRUE(pcd_spz.IsGaussianSplat());
+}
+
+TEST(TPointCloudIO, ReadPCDWithPaddingFields) {
+    const std::string filename = utility::filesystem::GetTempDirectoryPath() +
+                                 "/test_pcd_padding_fields.pcd";
+    std::ofstream file(filename, std::ios::binary);
+    file << "VERSION 0.7\n"
+            "FIELDS x y z _ labels\n"
+            "SIZE 4 4 4 1 4\n"
+            "TYPE F F F U U\n"
+            "COUNT 1 1 1 3 1\n"
+            "WIDTH 2\n"
+            "HEIGHT 1\n"
+            "POINTS 2\n"
+            "DATA binary\n";
+
+    // Each packed record has 12 position bytes, 3 padding bytes and 4 label
+    // bytes. Keep both records byte-aligned to the declared 19-byte pointsize.
+    const std::uint8_t data[] = {
+            // (1, 2, 3), padding (1, 2, 3), label 7.
+            0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64, 1, 2, 3, 7, 0, 0, 0,
+            // (2, 4, 5), padding (4, 5, 6), label 9.
+            0, 0, 0, 64, 0, 0, 128, 64, 0, 0, 160, 64, 4, 5, 6, 9, 0, 0, 0,
+    };
+    static_assert(sizeof(data) == 2 * (12 + 3 + 4),
+                  "Packed PCD fixture must be two 19-byte records");
+    file.write(reinterpret_cast<const char *>(data), sizeof(data));
+    file.close();
+
+    t::geometry::PointCloud pointcloud;
+    ASSERT_TRUE(t::io::ReadPointCloud(filename, pointcloud,
+                                      {"auto", false, false, false}));
+    EXPECT_EQ(pointcloud.GetPointPositions().ToFlatVector<float>(),
+              std::vector<float>({1, 2, 3, 2, 4, 5}));
+    ASSERT_TRUE(pointcloud.HasPointAttr("labels"));
+    EXPECT_EQ(pointcloud.GetPointAttr("labels").ToFlatVector<std::uint32_t>(),
+              std::vector<std::uint32_t>({7, 9}));
+    EXPECT_FALSE(pointcloud.HasPointAttr("_"));
 }
 
 }  // namespace tests
